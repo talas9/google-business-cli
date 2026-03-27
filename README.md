@@ -57,13 +57,45 @@ python generate_token.py
 ### 1. Prerequisites
 
 - Python 3.10+
-- A Google Cloud project with the following APIs enabled:
-  - [Google Ads API](https://console.cloud.google.com/apis/library/googleads.googleapis.com)
-  - [My Business Account Management API](https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com) (for GBP)
-  - [Content API for Shopping](https://console.cloud.google.com/apis/library/content.googleapis.com) (for Merchant Center)
-  - [Google Analytics Data API](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) (for GA4)
-- OAuth 2.0 client credentials (`client_secret.json`) from [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
-- A [Google Ads developer token](https://ads.google.com/aw/apicenter) (see [Developer Token Access Levels](#developer-token-access-levels) below)
+- A Google Cloud project with APIs enabled (see below)
+- OAuth 2.0 client credentials (`client_secret.json`)
+- A Google Ads developer token (from a [Manager Account / MCC](https://ads.google.com/intl/en/home/tools/manager-accounts/))
+
+### Google Cloud Project Setup
+
+1. **Create a project** (if you don't have one): [console.cloud.google.com/projectcreate](https://console.cloud.google.com/projectcreate)
+
+2. **Enable APIs** — click each link and click "ENABLE":
+
+   | API | Required for | Link |
+   |-----|-------------|------|
+   | Google Ads API | **Required** — all ads commands | [Enable](https://console.cloud.google.com/apis/library/googleads.googleapis.com) |
+   | My Business Account Mgmt API | GBP commands | [Enable](https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com) |
+   | My Business Business Info API | GBP location details | [Enable](https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com) |
+   | My Business v4 (legacy) | GBP reviews, posts, media | [Enable](https://console.cloud.google.com/apis/library/mybusiness.googleapis.com) |
+   | Content API for Shopping | Merchant Center commands | [Enable](https://console.cloud.google.com/apis/library/content.googleapis.com) |
+   | GA4 Data API | GA4 reports and realtime | [Enable](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) |
+   | GA4 Admin API | GA4 property metadata | [Enable](https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com) |
+
+   > You only need to enable the APIs for services you'll use. Google Ads API is required; the rest are optional.
+
+3. **Configure OAuth consent screen**:
+   - Go to [APIs & Services → OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+   - User Type: **External** (unless you have Google Workspace → Internal)
+   - App name: anything (e.g. `gads-cli`)
+   - User support email & developer contact: your email
+   - Click "SAVE AND CONTINUE" through Scopes
+   - On **Test Users**: add your Google account email
+   - Click "SAVE AND CONTINUE" → "BACK TO DASHBOARD"
+   - Your app stays in "Testing" mode — this is fine, you do NOT need to publish or verify it
+
+4. **Create OAuth credentials**:
+   - Go to [APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
+   - Click **+ CREATE CREDENTIALS** → **OAuth client ID**
+   - Application type: **Desktop app**
+   - Name: anything (e.g. `gads-cli`)
+   - Click **CREATE**, then **DOWNLOAD JSON**
+   - Save the file as `credentials/client_secret.json` in your project
 
 ### Developer Token Access Levels
 

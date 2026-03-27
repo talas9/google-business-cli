@@ -197,43 +197,63 @@ def auth_setup():
         click.echo()
 
     # ── Step 2: Google Cloud project ─────────────────────────
-    click.secho("  Step 2: Google Cloud Project\n", fg="white", bold=True)
-    click.echo("  You need a Google Cloud project with APIs enabled.")
-    click.echo("  If you don't have one, create it at:")
-    click.secho("  → https://console.cloud.google.com/projectcreate\n", fg="blue")
-    click.echo("  Then enable these APIs (click each link):")
+    click.secho("  Step 2: Google Cloud Project & APIs\n", fg="white", bold=True)
+    click.echo("  You need a Google Cloud project. If you don't have one:")
+    click.echo("    1. Go to:")
+    click.secho("       https://console.cloud.google.com/projectcreate", fg="blue")
+    click.echo("    2. Name it anything (e.g. 'google-business-cli')")
+    click.echo("    3. Click 'CREATE'\n")
+    click.echo("  Then enable the APIs you need. Click each link → click 'ENABLE':")
+    click.echo()
     apis = [
-        ("Google Ads API", "https://console.cloud.google.com/apis/library/googleads.googleapis.com"),
-        ("My Business Account Mgmt API", "https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com"),
-        ("My Business Business Info API", "https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com"),
-        ("Content API for Shopping", "https://console.cloud.google.com/apis/library/content.googleapis.com"),
-        ("GA4 Data API", "https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com"),
-        ("GA4 Admin API", "https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com"),
+        ("Google Ads API",               "https://console.cloud.google.com/apis/library/googleads.googleapis.com",                          "Required", "Campaign management, reporting, GAQL queries"),
+        ("My Business Account Mgmt API", "https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com",        "For GBP",  "List accounts, manage locations"),
+        ("My Business Business Info API", "https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com",     "For GBP",  "Location details, hours, attributes"),
+        ("My Business v4 (legacy)",       "https://console.cloud.google.com/apis/library/mybusiness.googleapis.com",                        "For GBP",  "Reviews, posts, media, Q&A"),
+        ("Content API for Shopping",      "https://console.cloud.google.com/apis/library/content.googleapis.com",                           "For MC",   "Products, feeds, shipping, returns"),
+        ("GA4 Data API",                  "https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com",                     "For GA4",  "Reports, realtime data"),
+        ("GA4 Admin API",                 "https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com",                    "For GA4",  "Property metadata, account structure"),
     ]
-    for name, url in apis:
+    for name, url, scope, desc in apis:
         click.echo(f"    • {name}")
         click.secho(f"      {url}", fg="blue")
-    click.echo()
+        click.secho(f"      [{scope}] {desc}", fg="white", dim=True)
+        click.echo()
+    click.echo("  ℹ  You only need to enable the APIs for services you'll use.")
+    click.echo("     Google Ads API is required. The others are optional.\n")
     click.pause("  Press Enter when APIs are enabled...")
     click.echo()
 
-    # ── Step 3: OAuth client credentials ─────────────────────
-    click.secho("  Step 3: OAuth Client Credentials\n", fg="white", bold=True)
+    # ── Step 3: OAuth consent screen + credentials ───────────
+    click.secho("  Step 3: OAuth Consent Screen & Client Credentials\n", fg="white", bold=True)
     creds_dir = CREDS_PATH.parent
     client_secret = creds_dir / "client_secret.json"
 
     if client_secret.exists():
         click.secho("  ✓ client_secret.json found", fg="green")
     else:
-        click.echo("  Create OAuth credentials:")
-        click.echo("    1. Go to: ")
+        click.echo("  First, configure the OAuth consent screen:")
+        click.echo("    1. Go to:")
+        click.secho("       https://console.cloud.google.com/apis/credentials/consent", fg="blue")
+        click.echo("    2. User Type: 'External' (unless you have Google Workspace)")
+        click.echo("    3. App name: anything (e.g. 'gads-cli')")
+        click.echo("    4. User support email: your email")
+        click.echo("    5. Developer contact: your email")
+        click.echo("    6. Click 'SAVE AND CONTINUE' through Scopes and Test Users")
+        click.echo("    7. On Test Users, add your Google account email")
+        click.echo("    8. Click 'SAVE AND CONTINUE' → 'BACK TO DASHBOARD'\n")
+        click.echo("  Then create OAuth credentials:")
+        click.echo("    1. Go to:")
         click.secho("       https://console.cloud.google.com/apis/credentials", fg="blue")
         click.echo("    2. Click '+ CREATE CREDENTIALS' → 'OAuth client ID'")
         click.echo("    3. Application type: 'Desktop app'")
         click.echo("    4. Name it anything (e.g. 'gads-cli')")
         click.echo("    5. Click 'CREATE', then 'DOWNLOAD JSON'")
-        click.echo(f"    6. Save the file as:")
+        click.echo(f"    6. Save the downloaded file as:")
         click.secho(f"       {client_secret}\n", fg="yellow")
+        click.secho("  ⚠  Your app will be in 'Testing' mode. This is fine —", fg="yellow")
+        click.secho("     it means only users you added as test users can log in.", fg="yellow")
+        click.secho("     You do NOT need to publish or verify the app.\n", fg="yellow")
         creds_dir.mkdir(parents=True, exist_ok=True)
         click.pause("  Press Enter when client_secret.json is saved...")
 
