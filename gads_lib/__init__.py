@@ -12,6 +12,7 @@ from .config import (
     MERCHANT_CENTER_ID,
     GA4_PROPERTY_ID,
     TZ_NAME,
+    CURRENCY,
 )
 from .auth import get_credentials
 from .ads import run_gaql

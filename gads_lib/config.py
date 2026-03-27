@@ -35,3 +35,6 @@ GA4_PROPERTY_ID = os.environ.get("GOOGLE_GA4_PROPERTY_ID", "")
 
 # ── Timezone (IANA format, e.g. "Asia/Dubai", "America/New_York") ──
 TZ_NAME = os.environ.get("GADS_TIMEZONE", "UTC")
+
+# ── Currency (ISO 4217 code, e.g. "USD", "AED", "EUR") ──────
+CURRENCY = os.environ.get("GADS_CURRENCY", "USD")

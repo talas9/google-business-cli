@@ -18,6 +18,7 @@ import click
 
 from gads_lib import (
     CREDS_PATH,
+    CURRENCY,
     CUSTOMER_ID,
     DB_PATH,
     DEV_TOKEN,
@@ -127,6 +128,7 @@ def auth_status(as_json):
         "merchant_center_id_set": bool(MERCHANT_CENTER_ID),
         "ga4_property_id_set": bool(GA4_PROPERTY_ID),
         "timezone": TZ_NAME,
+        "currency": CURRENCY,
         "scopes": scopes,
         "db_present": DB_PATH.exists(),
     }
@@ -546,6 +548,7 @@ def doctor(as_json):
         {"check": "merchant_center_id", "status": "ok" if MERCHANT_CENTER_ID else "warn", "detail": "set" if MERCHANT_CENTER_ID else "missing (optional)"},
         {"check": "ga4_property_id", "status": "ok" if GA4_PROPERTY_ID else "warn", "detail": "set" if GA4_PROPERTY_ID else "missing (optional)"},
         {"check": "timezone", "status": "ok", "detail": TZ_NAME},
+        {"check": "currency", "status": "ok", "detail": CURRENCY},
     ]
 
     if as_json:
