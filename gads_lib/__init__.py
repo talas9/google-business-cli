@@ -1,6 +1,6 @@
-"""Internal library for the Google Business CLI."""
+"""Internal library for the gads CLI."""
 
-__version__ = "2.3.0"
+__version__ = "3.0.0"
 
 from .config import (
     PROJECT_ROOT,
@@ -21,7 +21,15 @@ from .config import (
     CURRENCY,
 )
 from .auth import get_credentials
-from .ads import run_gaql
+from .ads import (
+    run_gaql,
+    ads_search,
+    ads_mutate,
+    ads_batch_mutate,
+    ads_upload_click_conversions,
+    generate_keyword_ideas,
+    generate_keyword_forecast,
+)
 from .db import get_db
 from .gbp import (
     gbp_delete_reply,

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# google-business-cli installer
+# gads-cli installer
 #
 # Install:
-#   curl -fsSL https://raw.githubusercontent.com/talas9/google-business-cli/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/talas9/gads-cli/main/scripts/install.sh | bash
 #
 # Interactive — detects Claude Code, gsd-pi, ruflo. Asks where to install,
 # wires agents + skills + hooks, runs auth setup.
 #
 set -euo pipefail
 
-REPO_URL="https://github.com/talas9/google-business-cli.git"
-DEFAULT_DIR="$HOME/.google-business-cli"
+REPO_URL="https://github.com/talas9/gads-cli.git"
+DEFAULT_DIR="$HOME/.gads-cli"
 VERSION="2.0.0"
 
 # ── Flags ────────────────────────────────────────────────────
@@ -25,10 +25,10 @@ while [[ $# -gt 0 ]]; do
     --dir)        INSTALL_DIR="$2"; shift 2 ;;
     --help|-h)
       cat <<EOF
-google-business-cli installer v${VERSION}
+gads-cli installer v${VERSION}
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/talas9/google-business-cli/main/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/talas9/gads-cli/main/scripts/install.sh | bash
 
 Options:
   --project     Install agents into current project instead of global
@@ -64,7 +64,7 @@ prompt() {
 # ── Banner ───────────────────────────────────────────────────
 echo ""
 echo -e "  ${CC}╔══════════════════════════════════════════════════════╗${R}"
-echo -e "  ${CC}║${R}  ${B}google-business-cli${R} v${VERSION}                         ${CC}║${R}"
+echo -e "  ${CC}║${R}  ${B}gads-cli${R} v${VERSION}                         ${CC}║${R}"
 echo -e "  ${CC}║${R}  Unified CLI: Google Ads · GBP · Merchant · GA4      ${CC}║${R}"
 echo -e "  ${CC}╚══════════════════════════════════════════════════════╝${R}"
 
@@ -200,11 +200,11 @@ ENDAGENT2
 
 # ── Skill template ───────────────────────────────────────────
 write_skill() {
-  local dir="$1/google-business-cli"
+  local dir="$1/gads-cli"
   mkdir -p "$dir"
   cat > "$dir/SKILL.md" << ENDSKILL
 ---
-name: google-business-cli
+name: gads-cli
 description: >
   Use when the user asks about Google Ads campaigns, performance, keywords,
   GBP reviews, Merchant Center products, or GA4 analytics. Triggers on:
@@ -241,11 +241,11 @@ write_hook() {
   local hookdir="$1" settings="$2"
   mkdir -p "$hookdir"
   cat > "$hookdir/gads-update-check.js" << ENDHOOK
-// google-business-cli — update check on session start
+// gads-cli — update check on session start
 const { execSync } = require("child_process");
 try {
   const r = execSync("git -C $CLI_DIR fetch --dry-run 2>&1", { encoding: "utf-8", timeout: 5000 });
-  if (r.trim()) process.stderr.write("\\x1b[33m⚠ google-business-cli has updates. Run: git -C $CLI_DIR pull\\x1b[0m\\n");
+  if (r.trim()) process.stderr.write("\\x1b[33m⚠ gads-cli has updates. Run: git -C $CLI_DIR pull\\x1b[0m\\n");
 } catch (e) {}
 ENDHOOK
   ok "Hook → $hookdir/gads-update-check.js"

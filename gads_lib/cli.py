@@ -31,6 +31,9 @@ from gads_lib import (
     SCOPE_TYPE,
     SNAPSHOTS_DIR,
     TZ_NAME,
+    ads_mutate,
+    ads_batch_mutate,
+    ads_upload_click_conversions,
     flatten,
     ga4_get_metadata,
     ga4_run_realtime_report,
@@ -41,6 +44,8 @@ from gads_lib import (
     gbp_list_locations,
     gbp_list_reviews,
     gbp_reply_review,
+    generate_keyword_ideas,
+    generate_keyword_forecast,
     get_credentials,
     get_db,
     mc_get_account,
@@ -156,7 +161,7 @@ def auth_setup():
     from pathlib import Path as _Path
 
     click.secho("\n  ╔══════════════════════════════════════════╗", fg="cyan")
-    click.secho("  ║   google-business-cli — Setup Wizard     ║", fg="cyan")
+    click.secho("  ║   gads-cli — Setup Wizard     ║", fg="cyan")
     click.secho("  ╚══════════════════════════════════════════╝\n", fg="cyan")
 
     # ── Step 0: Determine scope ──────────────────────────────
@@ -201,7 +206,7 @@ def auth_setup():
     click.echo("  You need a Google Cloud project. If you don't have one:")
     click.echo("    1. Go to:")
     click.secho("       https://console.cloud.google.com/projectcreate", fg="blue")
-    click.echo("    2. Name it anything (e.g. 'google-business-cli')")
+    click.echo("    2. Name it anything (e.g. 'gads-cli')")
     click.echo("    3. Click 'CREATE'\n")
     click.echo("  Then enable the APIs you need. Click each link → click 'ENABLE':")
     click.echo()
@@ -1168,6 +1173,877 @@ def ga4_realtime_cmd(property_id, dimensions, metrics, as_json):
         rows.append(r)
     print_table(rows, dim_h + met_h)
     click.echo(f"\n  {len(rows)} row(s)")
+
+
+# ── New command groups ───────────────────────────────────────
+
+@cli.group()
+def campaign():
+    """Campaign management commands."""
+    pass
+
+@cli.group()
+def adgroup():
+    """Ad group management commands."""
+    pass
+
+@cli.group("ad")
+def ad_group():
+    """Ad management commands."""
+    pass
+
+@cli.group()
+def keyword():
+    """Keyword management and research."""
+    pass
+
+@cli.group("asset")
+def asset_group():
+    """Asset management (images, sitelinks, callouts)."""
+    pass
+
+@cli.group("conversion")
+def conversion_group():
+    """Conversion tracking and upload."""
+    pass
+
+@cli.group("audience")
+def audience_group():
+    """Audience and user list management."""
+    pass
+
+@cli.group("report")
+def report_group():
+    """Specialized reports (geo, hourly, devices, search terms)."""
+    pass
+
+
+# ── Helpers ──────────────────────────────────────────────────
+
+def _confirm_and_log(action, details, dry_run=False, yes=False):
+    if dry_run:
+        click.secho(f"  DRY RUN: {action} — {details}", fg="yellow")
+        return False
+    if not yes:
+        click.confirm(f"  Execute: {action}?", abort=True)
+    return True
+
+def _auto_log(action, details, campaign_name="", campaign_id=""):
+    try:
+        import json as _json
+        conn = get_db()
+        ts = now_local()
+        raw = {"timestamp": ts, "action": action, "details": details, "campaign": campaign_name, "campaign_id": campaign_id, "agent": "gads-cli"}
+        conn.execute(
+            "INSERT INTO changelog (timestamp, action, campaign, campaign_id, details, reason, agent, snapshot_ref, script, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (ts, action, campaign_name, campaign_id, details, "", "gads-cli", "", "", _json.dumps(raw)))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+# ── Campaign commands ────────────────────────────────────────
+
+@campaign.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def campaign_list(as_json):
+    """List all campaigns with status and budget."""
+    creds = get_credentials()
+    results = run_gaql(creds, """
+        SELECT campaign.name, campaign.id, campaign.status,
+               campaign.advertising_channel_type, campaign_budget.amount_micros,
+               campaign.bidding_strategy_type
+        FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        c, b = r.get("campaign", {}), r.get("campaignBudget", {})
+        rows.append({"name": c.get("name",""), "id": c.get("id",""), "status": c.get("status",""),
+                     "type": c.get("advertisingChannelType",""),
+                     "budget": round(int(b.get("amountMicros",0))/1e6, 2),
+                     "bidding": c.get("biddingStrategyType","")})
+    print_table(rows, ["name", "id", "status", "type", "budget", "bidding"])
+
+@campaign.command("status")
+@click.argument("campaign_id")
+@click.argument("status", type=click.Choice(["ENABLED", "PAUSED"], case_sensitive=False))
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def campaign_status_cmd(campaign_id, status, dry_run, yes, as_json):
+    """Enable or pause a campaign."""
+    enforce_allowed_caller()
+    status = status.upper()
+    op = {"update": {"resourceName": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}", "status": status}, "updateMask": "status"}
+    if not _confirm_and_log(f"campaign {campaign_id} → {status}", f"status change", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "campaigns", [op])
+    _auto_log("campaign_status", f"{campaign_id} → {status}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Campaign {campaign_id} → {status}", fg="green")
+
+@campaign.command("budget")
+@click.argument("campaign_id")
+@click.argument("amount", type=float)
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def campaign_budget_cmd(campaign_id, amount, dry_run, yes, as_json):
+    """Change campaign daily budget."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    # Lookup budget resource name
+    results = run_gaql(creds, f"SELECT campaign.id, campaign_budget.resource_name FROM campaign WHERE campaign.id = {campaign_id}")
+    if not results:
+        click.secho(f"✗ Campaign {campaign_id} not found", fg="red", err=True)
+        raise SystemExit(1)
+    budget_rn = results[0].get("campaignBudget", {}).get("resourceName", "")
+    if not budget_rn:
+        click.secho("✗ No budget resource found", fg="red", err=True)
+        raise SystemExit(1)
+    micros = str(int(amount * 1_000_000))
+    op = {"update": {"resourceName": budget_rn, "amountMicros": micros}, "updateMask": "amountMicros"}
+    if not _confirm_and_log(f"budget → {amount} {CURRENCY}", f"campaign {campaign_id}", dry_run, yes):
+        return
+    result = ads_mutate(creds, "campaignBudgets", [op])
+    _auto_log("campaign_budget", f"{campaign_id} budget → {amount} {CURRENCY}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Campaign {campaign_id} budget → {amount} {CURRENCY}", fg="green")
+
+@campaign.command("perf")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--json", "as_json", is_flag=True)
+def campaign_perf(days, as_json):
+    """Campaign performance from API (last N days)."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT campaign.name, campaign.id, metrics.impressions, metrics.clicks,
+               metrics.conversions, metrics.cost_micros, metrics.ctr,
+               metrics.conversions_from_interactions_rate
+        FROM campaign WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
+          AND campaign.status != 'REMOVED'
+        ORDER BY metrics.conversions DESC""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        c, m = r.get("campaign", {}), r.get("metrics", {})
+        conv = float(m.get("conversions", 0))
+        cost = int(m.get("costMicros", 0)) / 1e6
+        rows.append({"name": c.get("name",""), "impr": m.get("impressions",0),
+                     "clicks": m.get("clicks",0), "conv": conv,
+                     "cost": round(cost, 2),
+                     "cpa": round(cost/conv, 2) if conv > 0 else "—",
+                     "ctr": m.get("ctr",""), "cvr": m.get("conversionsFromInteractionsRate","")})
+    print_table(rows, ["name", "impr", "clicks", "conv", "cost", "cpa", "ctr", "cvr"])
+
+
+# ── Ad Group commands ────────────────────────────────────────
+
+@adgroup.command("list")
+@click.option("--campaign", "-c", "campaign_id", required=True)
+@click.option("--json", "as_json", is_flag=True)
+def adgroup_list(campaign_id, as_json):
+    """List ad groups in a campaign."""
+    results = run_gaql(get_credentials(), f"""
+        SELECT ad_group.name, ad_group.id, ad_group.status, ad_group.type
+        FROM ad_group WHERE campaign.id = {campaign_id} ORDER BY ad_group.name""")
+    if as_json:
+        return print_json(results)
+    rows = [{"name": r.get("adGroup",{}).get("name",""), "id": r.get("adGroup",{}).get("id",""),
+             "status": r.get("adGroup",{}).get("status",""), "type": r.get("adGroup",{}).get("type","")}
+            for r in results]
+    print_table(rows, ["name", "id", "status", "type"])
+
+@adgroup.command("status")
+@click.argument("adgroup_id")
+@click.argument("status", type=click.Choice(["ENABLED", "PAUSED"], case_sensitive=False))
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def adgroup_status_cmd(adgroup_id, status, dry_run, yes, as_json):
+    """Enable or pause an ad group."""
+    enforce_allowed_caller()
+    status = status.upper()
+    op = {"update": {"resourceName": f"customers/{CUSTOMER_ID}/adGroups/{adgroup_id}", "status": status}, "updateMask": "status"}
+    if not _confirm_and_log(f"ad group {adgroup_id} → {status}", "status change", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "adGroups", [op])
+    _auto_log("adgroup_status", f"{adgroup_id} → {status}")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Ad group {adgroup_id} → {status}", fg="green")
+
+@adgroup.command("create")
+@click.argument("campaign_id")
+@click.argument("name")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def adgroup_create_cmd(campaign_id, name, dry_run, yes, as_json):
+    """Create an ad group."""
+    enforce_allowed_caller()
+    op = {"create": {"campaign": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}", "name": name, "status": "ENABLED"}}
+    if not _confirm_and_log(f"create ad group '{name}' in campaign {campaign_id}", "create", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "adGroups", [op])
+    _auto_log("adgroup_create", f"'{name}' in campaign {campaign_id}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Created ad group '{name}'", fg="green")
+
+
+# ── Ad commands ──────────────────────────────────────────────
+
+@ad_group.command("list")
+@click.option("--campaign", "-c", "campaign_id", default=None)
+@click.option("--adgroup", "-a", "adgroup_id", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def ad_list(campaign_id, adgroup_id, as_json):
+    """List ads with creatives."""
+    where = "WHERE ad_group_ad.status != 'REMOVED'"
+    if campaign_id:
+        where += f" AND campaign.id = {campaign_id}"
+    if adgroup_id:
+        where += f" AND ad_group.id = {adgroup_id}"
+    results = run_gaql(get_credentials(), f"""
+        SELECT ad_group.name, ad_group_ad.ad.id, ad_group_ad.status,
+               ad_group_ad.ad.type, ad_group_ad.ad.responsive_search_ad.headlines,
+               ad_group_ad.ad.responsive_search_ad.descriptions
+        FROM ad_group_ad {where} ORDER BY ad_group.name""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        ag = r.get("adGroup", {})
+        aga = r.get("adGroupAd", {})
+        ad = aga.get("ad", {})
+        rows.append({"ad_group": ag.get("name",""), "ad_id": ad.get("id",""),
+                     "status": aga.get("status",""), "type": ad.get("type","")})
+    print_table(rows, ["ad_group", "ad_id", "status", "type"])
+
+@ad_group.command("status")
+@click.argument("adgroup_id")
+@click.argument("ad_id")
+@click.argument("status", type=click.Choice(["ENABLED", "PAUSED"], case_sensitive=False))
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def ad_status_cmd(adgroup_id, ad_id, status, dry_run, yes, as_json):
+    """Enable or pause an ad."""
+    enforce_allowed_caller()
+    status = status.upper()
+    op = {"update": {"resourceName": f"customers/{CUSTOMER_ID}/adGroupAds/{adgroup_id}~{ad_id}", "status": status}, "updateMask": "status"}
+    if not _confirm_and_log(f"ad {ad_id} → {status}", "status change", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "adGroupAds", [op])
+    _auto_log("ad_status", f"ad {ad_id} in adgroup {adgroup_id} → {status}")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Ad {ad_id} → {status}", fg="green")
+
+@ad_group.command("perf")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--campaign", "-c", "campaign_id", default=None)
+@click.option("--json", "as_json", is_flag=True)
+def ad_perf(days, campaign_id, as_json):
+    """Ad-level performance."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    where = f"WHERE segments.date BETWEEN '{d_from}' AND '{d_to}' AND ad_group_ad.status != 'REMOVED'"
+    if campaign_id:
+        where += f" AND campaign.id = {campaign_id}"
+    results = run_gaql(get_credentials(), f"""
+        SELECT ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.type,
+               metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+        FROM ad_group_ad {where} ORDER BY metrics.conversions DESC""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        ag, aga, m = r.get("adGroup",{}), r.get("adGroupAd",{}).get("ad",{}), r.get("metrics",{})
+        conv = float(m.get("conversions",0))
+        cost = int(m.get("costMicros",0))/1e6
+        rows.append({"ad_group": ag.get("name",""), "ad_id": aga.get("id",""), "type": aga.get("type",""),
+                     "impr": m.get("impressions",0), "clicks": m.get("clicks",0), "conv": conv,
+                     "cost": round(cost,2), "cpa": round(cost/conv,2) if conv>0 else "—"})
+    print_table(rows, ["ad_group", "ad_id", "type", "impr", "clicks", "conv", "cost", "cpa"])
+
+
+# ── Keyword commands ─────────────────────────────────────────
+
+@keyword.command("list")
+@click.option("--campaign", "-c", "campaign_id", required=True)
+@click.option("--days", "-d", type=int, default=30)
+@click.option("--json", "as_json", is_flag=True)
+def keyword_list(campaign_id, days, as_json):
+    """List keywords with performance."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT ad_group.name, ad_group_criterion.keyword.text,
+               ad_group_criterion.keyword.match_type, ad_group_criterion.criterion_id,
+               metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+        FROM keyword_view WHERE campaign.id = {campaign_id}
+          AND segments.date BETWEEN '{d_from}' AND '{d_to}'
+        ORDER BY metrics.clicks DESC""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        ag, kw, m = r.get("adGroup",{}), r.get("adGroupCriterion",{}).get("keyword",{}), r.get("metrics",{})
+        conv = float(m.get("conversions",0))
+        cost = int(m.get("costMicros",0))/1e6
+        rows.append({"ad_group": ag.get("name",""), "keyword": kw.get("text",""),
+                     "match": kw.get("matchType",""), "impr": m.get("impressions",0),
+                     "clicks": m.get("clicks",0), "conv": conv, "cost": round(cost,2),
+                     "cpa": round(cost/conv,2) if conv>0 else "—"})
+    print_table(rows, ["ad_group", "keyword", "match", "impr", "clicks", "conv", "cost", "cpa"])
+
+@keyword.command("add")
+@click.argument("adgroup_id")
+@click.argument("text")
+@click.option("--match-type", "-m", type=click.Choice(["EXACT", "PHRASE", "BROAD"], case_sensitive=False), default="PHRASE")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def keyword_add(adgroup_id, text, match_type, dry_run, yes, as_json):
+    """Add a keyword to an ad group."""
+    enforce_allowed_caller()
+    op = {"create": {"adGroup": f"customers/{CUSTOMER_ID}/adGroups/{adgroup_id}",
+                     "keyword": {"text": text, "matchType": match_type.upper()}, "status": "ENABLED"}}
+    if not _confirm_and_log(f"add keyword '{text}' [{match_type}] to adgroup {adgroup_id}", "add keyword", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "adGroupCriteria", [op])
+    _auto_log("keyword_add", f"'{text}' [{match_type}] → adgroup {adgroup_id}")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Added keyword '{text}' [{match_type}]", fg="green")
+
+@keyword.command("remove")
+@click.argument("adgroup_id")
+@click.argument("criterion_id")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def keyword_remove(adgroup_id, criterion_id, dry_run, yes, as_json):
+    """Remove a keyword from an ad group."""
+    enforce_allowed_caller()
+    # Tilde format for ad group criteria
+    rn = f"customers/{CUSTOMER_ID}/adGroupCriteria/{adgroup_id}~{criterion_id}"
+    op = {"remove": rn}
+    if not _confirm_and_log(f"remove criterion {criterion_id} from adgroup {adgroup_id}", "remove keyword", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "adGroupCriteria", [op])
+    _auto_log("keyword_remove", f"criterion {criterion_id} from adgroup {adgroup_id}")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Removed criterion {criterion_id}", fg="green")
+
+@keyword.command("negative")
+@click.argument("campaign_id")
+@click.argument("text")
+@click.option("--match-type", "-m", type=click.Choice(["EXACT", "PHRASE", "BROAD"], case_sensitive=False), default="PHRASE")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def keyword_negative(campaign_id, text, match_type, dry_run, yes, as_json):
+    """Add a negative keyword to a campaign."""
+    enforce_allowed_caller()
+    op = {"create": {"campaign": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}",
+                     "keyword": {"text": text, "matchType": match_type.upper()}, "negative": True}}
+    if not _confirm_and_log(f"add negative '{text}' [{match_type}] to campaign {campaign_id}", "add negative", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "campaignCriteria", [op])
+    _auto_log("keyword_negative", f"negative '{text}' [{match_type}] → campaign {campaign_id}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Added negative '{text}' [{match_type}]", fg="green")
+
+@keyword.command("search-terms")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--campaign", "-c", "campaign_id", default=None)
+@click.option("--min-clicks", type=int, default=0)
+@click.option("--json", "as_json", is_flag=True)
+def keyword_search_terms(days, campaign_id, min_clicks, as_json):
+    """Search terms report."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    where = f"WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'"
+    if campaign_id:
+        where += f" AND campaign.id = {campaign_id}"
+    if min_clicks > 0:
+        where += f" AND metrics.clicks >= {min_clicks}"
+    results = run_gaql(get_credentials(), f"""
+        SELECT search_term_view.search_term, campaign.name,
+               metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+        FROM search_term_view {where} ORDER BY metrics.clicks DESC""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        st, c, m = r.get("searchTermView",{}), r.get("campaign",{}), r.get("metrics",{})
+        conv = float(m.get("conversions",0))
+        cost = int(m.get("costMicros",0))/1e6
+        rows.append({"search_term": st.get("searchTerm",""), "campaign": c.get("name",""),
+                     "impr": m.get("impressions",0), "clicks": m.get("clicks",0),
+                     "conv": conv, "cost": round(cost,2),
+                     "cpa": round(cost/conv,2) if conv>0 else "—"})
+    print_table(rows, ["search_term", "campaign", "impr", "clicks", "conv", "cost", "cpa"])
+
+@keyword.command("ideas")
+@click.option("--keywords", "-k", default=None, help="Comma-separated seed keywords.")
+@click.option("--url", "-u", default=None, help="Seed URL for ideas.")
+@click.option("--language", default="1000", help="Language ID (default: 1000=English).")
+@click.option("--geo", default=None, help="Comma-separated geo target IDs (e.g. 2784=UAE).")
+@click.option("--json", "as_json", is_flag=True)
+def keyword_ideas_cmd(keywords, url, language, geo, as_json):
+    """Generate keyword ideas (requires Standard Access dev token)."""
+    kw_list = [k.strip() for k in keywords.split(",")] if keywords else None
+    geo_list = [g.strip() for g in geo.split(",")] if geo else None
+    result = generate_keyword_ideas(get_credentials(), keywords=kw_list, url=url, language_id=language, geo_ids=geo_list)
+    if as_json:
+        return print_json(result)
+    ideas = result.get("results", [])
+    rows = []
+    for idea in ideas[:50]:
+        kw = idea.get("keywordIdeaMetrics", {})
+        rows.append({"keyword": idea.get("text",""),
+                     "avg_monthly": kw.get("avgMonthlySearches",""),
+                     "competition": kw.get("competition",""),
+                     "low_cpc": kw.get("lowTopOfPageBidMicros",""),
+                     "high_cpc": kw.get("highTopOfPageBidMicros","")})
+    print_table(rows, ["keyword", "avg_monthly", "competition", "low_cpc", "high_cpc"])
+    click.echo(f"\n  {len(ideas)} idea(s)")
+
+@keyword.command("forecast")
+@click.option("--keywords", "-k", required=True, help="Comma-separated keywords.")
+@click.option("--language", default="1000")
+@click.option("--geo", default=None, help="Comma-separated geo target IDs.")
+@click.option("--json", "as_json", is_flag=True)
+def keyword_forecast_cmd(keywords, language, geo, as_json):
+    """Keyword traffic/cost forecast (requires Standard Access dev token)."""
+    kw_list = [k.strip() for k in keywords.split(",")]
+    geo_list = [g.strip() for g in geo.split(",")] if geo else None
+    result = generate_keyword_forecast(get_credentials(), keywords=kw_list, language_id=language, geo_ids=geo_list)
+    if as_json:
+        return print_json(result)
+    print_json(result)
+
+
+# ── Asset commands ───────────────────────────────────────────
+
+@asset_group.command("list")
+@click.option("--type", "asset_type", default=None, help="Filter by type (IMAGE, SITELINK, etc).")
+@click.option("--json", "as_json", is_flag=True)
+def asset_list(asset_type, as_json):
+    """List assets."""
+    where = "WHERE asset.type != 'UNSPECIFIED'"
+    if asset_type:
+        where += f" AND asset.type = '{asset_type.upper()}'"
+    results = run_gaql(get_credentials(), f"""
+        SELECT asset.id, asset.name, asset.type, asset.resource_name
+        FROM asset {where} ORDER BY asset.type, asset.name""")
+    if as_json:
+        return print_json(results)
+    rows = [{"id": r.get("asset",{}).get("id",""), "name": r.get("asset",{}).get("name",""),
+             "type": r.get("asset",{}).get("type","")} for r in results]
+    print_table(rows, ["id", "name", "type"])
+
+@asset_group.command("sitelink")
+@click.argument("campaign_id")
+@click.option("--link-text", required=True)
+@click.option("--desc1", default="")
+@click.option("--desc2", default="")
+@click.option("--url", required=True)
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def asset_sitelink(campaign_id, link_text, desc1, desc2, url, dry_run, yes, as_json):
+    """Add a sitelink to a campaign (two-step: create asset + link)."""
+    enforce_allowed_caller()
+    if not _confirm_and_log(f"add sitelink '{link_text}' → {url} to campaign {campaign_id}", "sitelink", dry_run, yes):
+        return
+    creds = get_credentials()
+    # Step 1: Create the sitelink asset — finalUrls at top level, NOT inside sitelinkAsset
+    asset_op = {"create": {"sitelinkAsset": {"linkText": link_text, "description1": desc1, "description2": desc2}, "finalUrls": [url]}}
+    asset_result = ads_mutate(creds, "assets", [asset_op])
+    asset_rn = asset_result.get("results", [{}])[0].get("resourceName", "")
+    if not asset_rn:
+        click.secho("✗ Failed to create sitelink asset", fg="red", err=True)
+        raise SystemExit(1)
+    # Step 2: Link to campaign
+    link_op = {"create": {"asset": asset_rn, "campaign": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}", "fieldType": "SITELINK"}}
+    result = ads_mutate(creds, "campaignAssets", [link_op])
+    _auto_log("asset_sitelink", f"'{link_text}' → campaign {campaign_id}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Sitelink '{link_text}' added to campaign {campaign_id}", fg="green")
+
+@asset_group.command("callout")
+@click.argument("campaign_id")
+@click.option("--text", required=True)
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def asset_callout(campaign_id, text, dry_run, yes, as_json):
+    """Add a callout extension to a campaign."""
+    enforce_allowed_caller()
+    if not _confirm_and_log(f"add callout '{text}' to campaign {campaign_id}", "callout", dry_run, yes):
+        return
+    creds = get_credentials()
+    asset_op = {"create": {"calloutAsset": {"calloutText": text}}}
+    asset_result = ads_mutate(creds, "assets", [asset_op])
+    asset_rn = asset_result.get("results", [{}])[0].get("resourceName", "")
+    link_op = {"create": {"asset": asset_rn, "campaign": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}", "fieldType": "CALLOUT"}}
+    result = ads_mutate(creds, "campaignAssets", [link_op])
+    _auto_log("asset_callout", f"'{text}' → campaign {campaign_id}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Callout '{text}' added", fg="green")
+
+@asset_group.command("call")
+@click.argument("campaign_id")
+@click.option("--phone", required=True)
+@click.option("--country-code", default="US")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def asset_call(campaign_id, phone, country_code, dry_run, yes, as_json):
+    """Add a call extension to a campaign."""
+    enforce_allowed_caller()
+    if not _confirm_and_log(f"add call {phone} ({country_code}) to campaign {campaign_id}", "call ext", dry_run, yes):
+        return
+    creds = get_credentials()
+    asset_op = {"create": {"callAsset": {"phoneNumber": phone, "countryCode": country_code.upper()}}}
+    asset_result = ads_mutate(creds, "assets", [asset_op])
+    asset_rn = asset_result.get("results", [{}])[0].get("resourceName", "")
+    link_op = {"create": {"asset": asset_rn, "campaign": f"customers/{CUSTOMER_ID}/campaigns/{campaign_id}", "fieldType": "CALL"}}
+    result = ads_mutate(creds, "campaignAssets", [link_op])
+    _auto_log("asset_call", f"{phone} ({country_code}) → campaign {campaign_id}", campaign_id=campaign_id)
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Call extension {phone} added", fg="green")
+
+
+# ── Conversion commands ──────────────────────────────────────
+
+@conversion_group.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def conversion_list(as_json):
+    """List conversion actions."""
+    results = run_gaql(get_credentials(), """
+        SELECT conversion_action.name, conversion_action.id, conversion_action.type,
+               conversion_action.status, conversion_action.category
+        FROM conversion_action ORDER BY conversion_action.name""")
+    if as_json:
+        return print_json(results)
+    rows = [{"name": r.get("conversionAction",{}).get("name",""),
+             "id": r.get("conversionAction",{}).get("id",""),
+             "type": r.get("conversionAction",{}).get("type",""),
+             "status": r.get("conversionAction",{}).get("status",""),
+             "category": r.get("conversionAction",{}).get("category","")}
+            for r in results]
+    print_table(rows, ["name", "id", "type", "status", "category"])
+
+@conversion_group.command("create")
+@click.argument("name")
+@click.option("--type", "conv_type", default="WEBPAGE", type=click.Choice(["WEBPAGE", "UPLOAD", "AD_CALL", "CLICK_TO_CALL"]))
+@click.option("--category", default="DEFAULT")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def conversion_create(name, conv_type, category, dry_run, yes, as_json):
+    """Create a conversion action."""
+    enforce_allowed_caller()
+    op = {"create": {"name": name, "type": conv_type, "category": category, "status": "ENABLED"}}
+    if not _confirm_and_log(f"create conversion action '{name}' [{conv_type}]", "create conversion", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), "conversionActions", [op])
+    _auto_log("conversion_create", f"'{name}' [{conv_type}]")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Created conversion action '{name}'", fg="green")
+
+@conversion_group.command("tag")
+@click.argument("conversion_id")
+@click.option("--json", "as_json", is_flag=True)
+def conversion_tag(conversion_id, as_json):
+    """Get conversion tracking tag/snippet."""
+    results = run_gaql(get_credentials(), f"""
+        SELECT conversion_action.name, conversion_action.id,
+               conversion_action.tag_snippets
+        FROM conversion_action WHERE conversion_action.id = {conversion_id}""")
+    if as_json:
+        return print_json(results)
+    if results:
+        ca = results[0].get("conversionAction", {})
+        click.secho(f"\n  {ca.get('name', '')} (ID: {ca.get('id', '')})\n", bold=True)
+        snippets = ca.get("tagSnippets", [])
+        for s in snippets:
+            click.secho(f"  Type: {s.get('type','')}", fg="cyan")
+            click.echo(f"  {s.get('eventSnippet','')}\n")
+    else:
+        click.echo("  (not found)")
+
+@conversion_group.command("perf")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--json", "as_json", is_flag=True)
+def conversion_perf(days, as_json):
+    """Conversion performance by action."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT segments.conversion_action_name, metrics.conversions,
+               metrics.all_conversions, metrics.conversions_value
+        FROM campaign WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
+          AND metrics.conversions > 0
+        ORDER BY metrics.conversions DESC""")
+    if as_json:
+        return print_json(results)
+    # Aggregate by conversion action
+    agg = {}
+    for r in results:
+        name = r.get("segments",{}).get("conversionActionName","")
+        m = r.get("metrics",{})
+        if name not in agg:
+            agg[name] = {"name": name, "conv": 0, "all_conv": 0, "value": 0}
+        agg[name]["conv"] += float(m.get("conversions",0))
+        agg[name]["all_conv"] += float(m.get("allConversions",0))
+        agg[name]["value"] += float(m.get("conversionsValue",0))
+    rows = sorted(agg.values(), key=lambda x: x["conv"], reverse=True)
+    print_table(rows, ["name", "conv", "all_conv", "value"])
+
+@conversion_group.command("upload")
+@click.option("--gclid", required=True)
+@click.option("--action-id", required=True, help="Conversion action resource name.")
+@click.option("--time", "conv_time", required=True, help="Conversion time (ISO 8601).")
+@click.option("--value", type=float, default=None)
+@click.option("--currency", default=None)
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def conversion_upload_cmd(gclid, action_id, conv_time, value, currency, dry_run, yes, as_json):
+    """Upload an offline conversion."""
+    enforce_allowed_caller()
+    conv = {"gclid": gclid, "conversionDateTime": conv_time}
+    if value is not None:
+        conv["conversionValue"] = value
+    if currency:
+        conv["currencyCode"] = currency
+    if not _confirm_and_log(f"upload conversion gclid={gclid}", "upload conversion", dry_run, yes):
+        return
+    result = ads_upload_click_conversions(get_credentials(), [conv], action_id)
+    _auto_log("conversion_upload", f"gclid={gclid}")
+    if as_json:
+        return print_json(result)
+    click.secho("✓ Conversion uploaded", fg="green")
+
+
+# ── Audience commands ────────────────────────────────────────
+
+@audience_group.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def audience_list(as_json):
+    """List user lists / audiences."""
+    results = run_gaql(get_credentials(), """
+        SELECT user_list.name, user_list.id, user_list.type,
+               user_list.size_for_search, user_list.size_for_display,
+               user_list.membership_status, user_list.match_rate_percentage
+        FROM user_list ORDER BY user_list.name""")
+    if as_json:
+        return print_json(results)
+    rows = [{"name": r.get("userList",{}).get("name",""),
+             "id": r.get("userList",{}).get("id",""),
+             "type": r.get("userList",{}).get("type",""),
+             "search_size": r.get("userList",{}).get("sizeForSearch",""),
+             "display_size": r.get("userList",{}).get("sizeForDisplay",""),
+             "match_rate": r.get("userList",{}).get("matchRatePercentage","")}
+            for r in results]
+    print_table(rows, ["name", "id", "type", "search_size", "display_size", "match_rate"])
+
+
+# ── Report commands ──────────────────────────────────────────
+
+@report_group.command("geo")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--json", "as_json", is_flag=True)
+def report_geo(days, as_json):
+    """Geographic performance report."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT geographic_view.country_criterion_id, geographic_view.location_type,
+               metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+        FROM geographic_view WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
+        ORDER BY metrics.clicks DESC""")
+    if as_json:
+        return print_json(results)
+    rows = []
+    for r in results:
+        gv, m = r.get("geographicView",{}), r.get("metrics",{})
+        conv = float(m.get("conversions",0))
+        cost = int(m.get("costMicros",0))/1e6
+        rows.append({"country_id": gv.get("countryCriterionId",""), "type": gv.get("locationType",""),
+                     "impr": m.get("impressions",0), "clicks": m.get("clicks",0),
+                     "conv": conv, "cost": round(cost,2)})
+    print_table(rows, ["country_id", "type", "impr", "clicks", "conv", "cost"])
+
+@report_group.command("hourly")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--json", "as_json", is_flag=True)
+def report_hourly(days, as_json):
+    """Hourly performance breakdown."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT segments.hour, metrics.impressions, metrics.clicks,
+               metrics.conversions, metrics.cost_micros
+        FROM campaign WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
+        ORDER BY segments.hour""")
+    if as_json:
+        return print_json(results)
+    # Aggregate by hour
+    hours = {}
+    for r in results:
+        h = r.get("segments",{}).get("hour","")
+        m = r.get("metrics",{})
+        if h not in hours:
+            hours[h] = {"hour": h, "impr": 0, "clicks": 0, "conv": 0, "cost": 0}
+        hours[h]["impr"] += int(m.get("impressions",0))
+        hours[h]["clicks"] += int(m.get("clicks",0))
+        hours[h]["conv"] += float(m.get("conversions",0))
+        hours[h]["cost"] += int(m.get("costMicros",0))/1e6
+    rows = [{"hour": v["hour"], "impr": v["impr"], "clicks": v["clicks"],
+             "conv": round(v["conv"],1), "cost": round(v["cost"],2)} for v in sorted(hours.values(), key=lambda x: int(x["hour"]))]
+    print_table(rows, ["hour", "impr", "clicks", "conv", "cost"])
+
+@report_group.command("devices")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--json", "as_json", is_flag=True)
+def report_devices(days, as_json):
+    """Device performance breakdown."""
+    from datetime import datetime, timedelta
+    d_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    d_to = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    results = run_gaql(get_credentials(), f"""
+        SELECT segments.device, metrics.impressions, metrics.clicks,
+               metrics.conversions, metrics.cost_micros
+        FROM campaign WHERE segments.date BETWEEN '{d_from}' AND '{d_to}'
+        ORDER BY metrics.clicks DESC""")
+    if as_json:
+        return print_json(results)
+    devs = {}
+    for r in results:
+        d = r.get("segments",{}).get("device","")
+        m = r.get("metrics",{})
+        if d not in devs:
+            devs[d] = {"device": d, "impr": 0, "clicks": 0, "conv": 0, "cost": 0}
+        devs[d]["impr"] += int(m.get("impressions",0))
+        devs[d]["clicks"] += int(m.get("clicks",0))
+        devs[d]["conv"] += float(m.get("conversions",0))
+        devs[d]["cost"] += int(m.get("costMicros",0))/1e6
+    rows = [{"device": v["device"], "impr": v["impr"], "clicks": v["clicks"],
+             "conv": round(v["conv"],1), "cost": round(v["cost"],2)} for v in sorted(devs.values(), key=lambda x: x["clicks"], reverse=True)]
+    print_table(rows, ["device", "impr", "clicks", "conv", "cost"])
+
+@report_group.command("search-terms")
+@click.option("--days", "-d", type=int, default=7)
+@click.option("--campaign", "-c", "campaign_id", default=None)
+@click.option("--min-clicks", type=int, default=0)
+@click.option("--json", "as_json", is_flag=True)
+def report_search_terms(days, campaign_id, min_clicks, as_json):
+    """Search terms report (alias for keyword search-terms)."""
+    # Delegate to keyword search-terms
+    ctx = click.get_current_context()
+    ctx.invoke(keyword_search_terms, days=days, campaign_id=campaign_id, min_clicks=min_clicks, as_json=as_json)
+
+
+# ── Generic mutate commands (escape hatch) ───────────────────
+
+@cli.command("mutate")
+@click.argument("resource_type")
+@click.argument("operations_json")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def mutate_single(resource_type, operations_json, dry_run, yes, as_json):
+    """Generic single-resource mutate (escape hatch)."""
+    enforce_allowed_caller()
+    import json as _json
+    try:
+        ops = _json.loads(operations_json)
+    except _json.JSONDecodeError as e:
+        click.secho(f"✗ Invalid JSON: {e}", fg="red", err=True)
+        raise SystemExit(1)
+    if not isinstance(ops, list):
+        ops = [ops]
+    if not _confirm_and_log(f"mutate {resource_type} ({len(ops)} ops)", f"generic mutate", dry_run, yes):
+        return
+    result = ads_mutate(get_credentials(), resource_type, ops)
+    _auto_log("mutate", f"{resource_type}: {len(ops)} operations")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Mutated {resource_type}", fg="green")
+    print_json(result)
+
+@cli.command("batch-mutate")
+@click.argument("operations_json")
+@click.option("--dry-run", is_flag=True)
+@click.option("--yes", "-y", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def batch_mutate_cmd(operations_json, dry_run, yes, as_json):
+    """Generic cross-resource batch mutate (escape hatch)."""
+    enforce_allowed_caller()
+    import json as _json
+    try:
+        ops = _json.loads(operations_json)
+    except _json.JSONDecodeError as e:
+        click.secho(f"✗ Invalid JSON: {e}", fg="red", err=True)
+        raise SystemExit(1)
+    if not isinstance(ops, list):
+        ops = [ops]
+    if not _confirm_and_log(f"batch mutate ({len(ops)} ops)", f"batch mutate", dry_run, yes):
+        return
+    result = ads_batch_mutate(get_credentials(), ops)
+    _auto_log("batch_mutate", f"{len(ops)} operations")
+    if as_json:
+        return print_json(result)
+    click.secho(f"✓ Batch mutate complete", fg="green")
+    print_json(result)
+
+
+# ── Standalone commands ──────────────────────────────────────
+
+@cli.command("accounts")
+@click.option("--json", "as_json", is_flag=True)
+def accounts_cmd(as_json):
+    """List accessible Google Ads accounts."""
+    results = run_gaql(get_credentials(), """
+        SELECT customer_client.id, customer_client.descriptive_name,
+               customer_client.status, customer_client.manager
+        FROM customer_client ORDER BY customer_client.descriptive_name""")
+    if as_json:
+        return print_json(results)
+    rows = [{"id": r.get("customerClient",{}).get("id",""),
+             "name": r.get("customerClient",{}).get("descriptiveName",""),
+             "status": r.get("customerClient",{}).get("status",""),
+             "manager": r.get("customerClient",{}).get("manager","")}
+            for r in results]
+    print_table(rows, ["id", "name", "status", "manager"])
+
 
 # ── Register grouped aliases ────────────────────────────────
 ads.add_command(query, name="query")

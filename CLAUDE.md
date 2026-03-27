@@ -1,4 +1,4 @@
-# google-business-cli
+# gads-cli
 
 Unified Google platform CLI for managing Google Ads, Google Business Profile, Google Merchant Center, and GA4.
 

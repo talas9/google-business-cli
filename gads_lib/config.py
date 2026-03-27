@@ -1,4 +1,4 @@
-"""Configuration for google-business-cli.
+"""Configuration for gads-cli.
 
 Scope detection (determines where credentials, data, and .env live):
   1. GADS_PROJECT_ROOT env var set       → project scope (that directory)
@@ -30,8 +30,8 @@ def _detect_scope():
     if (cwd / "data").is_dir() or (cwd / "credentials").is_dir() or (cwd / ".env").exists():
         return cwd, "project"
 
-    # Check if we're inside a submodule layout (google-business-cli/ inside a project)
-    pkg_dir = Path(__file__).resolve().parent.parent  # google-business-cli/
+    # Check if we're inside a submodule layout (gads-cli/ inside a project)
+    pkg_dir = Path(__file__).resolve().parent.parent  # gads-cli/
     parent = pkg_dir.parent
     if (parent / "data").is_dir() or (parent / "credentials").is_dir():
         return parent, "project"

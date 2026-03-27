@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "google-business-cli"
+name = "gads-cli"
 dynamic = ["version"]
 description = "Unified CLI for Google Ads, Business Profile, Merchant Center, and GA4"
 readme = "README.md"
@@ -42,9 +42,9 @@ dev = [
 gads = "gads_lib.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/talas9/google-business-cli"
-Repository = "https://github.com/talas9/google-business-cli"
-Issues = "https://github.com/talas9/google-business-cli/issues"
+Homepage = "https://github.com/talas9/gads-cli"
+Repository = "https://github.com/talas9/gads-cli"
+Issues = "https://github.com/talas9/gads-cli/issues"
 
 [tool.setuptools.packages.find]
 include = ["gads_lib*"]

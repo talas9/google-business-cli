@@ -1,6 +1,10 @@
-# google-business-cli
+# gads-cli
 
-Unified CLI for managing Google Ads, Google Business Profile, Google Merchant Center, and Google Analytics (GA4). Built for AI coding agents (Claude Code, Cursor, etc.) and human operators.
+**Google Ads CLI** — a unified command-line tool for managing Google Ads campaigns, with built-in support for Google Business Profile, Google Merchant Center, and Google Analytics (GA4).
+
+Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Every command supports `--json` for machine-readable output and `--help` for full documentation.
+
+> The name `gads` stands for **G**oogle **Ads**. While Google Ads is the primary focus, the CLI also provides commands for related Google services (GBP, Merchant Center, GA4) that are commonly used alongside ad campaigns.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
@@ -28,15 +32,15 @@ Unified CLI for managing Google Ads, Google Business Profile, Google Merchant Ce
 One command — downloads the CLI, detects your AI platforms (Claude Code, gsd-pi, ruflo), installs agents + skills + hooks, and runs auth setup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/talas9/google-business-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/talas9/gads-cli/main/scripts/install.sh | bash
 ```
 
 The installer is interactive. It will:
-1. Download the CLI to `~/.google-business-cli/`
+1. Download the CLI to `~/.gads-cli/`
 2. Install Python dependencies
 3. Detect Claude Code, gsd-pi, and ruflo
 4. Ask which platforms to wire up (global or project scope)
-5. Install a specialized `google-platform-operator` agent + `google-business-cli` skill + update hook
+5. Install a specialized `google-platform-operator` agent + `gads-cli` skill + update hook
 6. Run the OAuth setup wizard
 
 ### Manual Setup
@@ -44,8 +48,8 @@ The installer is interactive. It will:
 If you prefer manual installation:
 
 ```bash
-git clone https://github.com/talas9/google-business-cli.git
-cd google-business-cli
+git clone https://github.com/talas9/gads-cli.git
+cd gads-cli
 pip install .
 cp .env.example .env && $EDITOR .env
 python generate_token.py
@@ -266,7 +270,7 @@ python fetch_daily.py --days 3
 python fetch_daily.py --days 7 --config --push
 
 # Cron example (fetch at 3:30 AM daily):
-# 30 3 * * * cd /path/to/project && python google-business-cli/fetch_daily.py --days 3 --push
+# 30 3 * * * cd /path/to/project && python gads-cli/fetch_daily.py --days 3 --push
 ```
 
 ## Configuration Reference
@@ -301,7 +305,7 @@ When `GADS_ENFORCE_CALLER=1`, the CLI verifies `GADS_CALLER_AGENT` matches `GADS
 ## Architecture
 
 ```
-google-business-cli/
+gads-cli/
 ├── gads                  # Main CLI entry point (Click)
 ├── gads.sh               # Shell wrapper with .env loading
 ├── gads_lib/
