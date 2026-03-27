@@ -16,15 +16,19 @@ from datetime import datetime, timedelta
 import click
 
 from gads_lib import (
+    CONFIG_HOME,
     CREDS_PATH,
     CURRENCY,
     CUSTOMER_ID,
     DB_PATH,
     DEV_TOKEN,
     GA4_PROPERTY_ID,
+    GLOBAL_HOME,
     LOGIN_CUSTOMER_ID,
     MERCHANT_CENTER_ID,
     PROJECT_ROOT,
+    SCOPE_ROOT,
+    SCOPE_TYPE,
     SNAPSHOTS_DIR,
     TZ_NAME,
     flatten,
@@ -122,7 +126,8 @@ def auth_status(as_json):
         scopes = sorted(list(creds.scopes or []))
 
     payload = {
-        "project_root": str(PROJECT_ROOT),
+        "scope": SCOPE_TYPE,
+        "scope_root": str(SCOPE_ROOT),
         "credentials_present": creds_present,
         "developer_token_present": bool(DEV_TOKEN),
         "login_customer_id_set": bool(LOGIN_CUSTOMER_ID),
@@ -132,6 +137,7 @@ def auth_status(as_json):
         "timezone": TZ_NAME,
         "currency": CURRENCY,
         "scopes": scopes,
+        "db_path": str(DB_PATH),
         "db_present": DB_PATH.exists(),
     }
 
@@ -153,10 +159,29 @@ def auth_setup():
     click.secho("  ║   google-business-cli — Setup Wizard     ║", fg="cyan")
     click.secho("  ╚══════════════════════════════════════════╝\n", fg="cyan")
 
+    # ── Step 0: Determine scope ──────────────────────────────
+    # Project-local if CWD has .env/.env.example or GADS_PROJECT_ROOT is set.
+    # Otherwise user-global (~/.config/gads/).
+    cwd = _Path.cwd()
+    explicit_root = os.environ.get("GADS_PROJECT_ROOT")
+    if explicit_root:
+        scope_dir = _Path(explicit_root)
+        scope_label = f"project ({scope_dir})"
+    elif (cwd / ".env").exists() or (cwd / ".env.example").exists() or (cwd / "data").is_dir():
+        scope_dir = cwd
+        scope_label = f"project ({cwd})"
+    else:
+        scope_dir = CONFIG_HOME
+        scope_label = f"global ({CONFIG_HOME})"
+
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    env_path = scope_dir / ".env"
+    click.secho(f"  Scope: {scope_label}\n", fg="white", bold=True)
+
     # ── Step 1: .env file ────────────────────────────────────
-    cli_dir = _Path(__file__).resolve().parent
-    env_path = cli_dir / ".env"
-    env_example = cli_dir / ".env.example"
+    # Look for .env.example in the CLI package directory
+    pkg_dir = _Path(__file__).resolve().parent.parent
+    env_example = pkg_dir / ".env.example"
 
     if env_path.exists():
         click.secho("  ✓ .env file exists", fg="green")
@@ -165,10 +190,10 @@ def auth_setup():
         if env_example.exists():
             import shutil
             shutil.copy(env_example, env_path)
-            click.secho("  ✓ Created .env from .env.example", fg="green")
+            click.secho(f"  ✓ Created .env from template at {env_path}", fg="green")
         else:
             env_path.touch()
-            click.secho("  ✓ Created empty .env", fg="green")
+            click.secho(f"  ✓ Created empty .env at {env_path}", fg="green")
         click.echo()
 
     # ── Step 2: Google Cloud project ─────────────────────────
@@ -300,14 +325,22 @@ def auth_setup():
 
     click.echo()
 
-    # ── Step 8: Timezone ─────────────────────────────────────
-    click.secho("  Step 8: Timezone\n", fg="white", bold=True)
+    # ── Step 8: Timezone & Currency ────────────────────────────
+    click.secho("  Step 8: Timezone & Currency\n", fg="white", bold=True)
     click.echo(f"  Current timezone: {TZ_NAME}")
     click.echo("  Use IANA format (e.g. America/New_York, Europe/London, Asia/Dubai)\n")
     tz = click.prompt("  Timezone (or Enter to keep current)", default=TZ_NAME, show_default=False)
     if tz.strip() and tz.strip() != TZ_NAME:
         _append_env(env_path, "GADS_TIMEZONE", tz.strip())
         click.secho(f"  ✓ Timezone set to {tz.strip()}", fg="green")
+    click.echo()
+
+    click.echo(f"  Current currency: {CURRENCY}")
+    click.echo("  Use ISO 4217 code (e.g. USD, AED, EUR, GBP)\n")
+    cur = click.prompt("  Currency (or Enter to keep current)", default=CURRENCY, show_default=False)
+    if cur.strip().upper() and cur.strip().upper() != CURRENCY:
+        _append_env(env_path, "GADS_CURRENCY", cur.strip().upper())
+        click.secho(f"  ✓ Currency set to {cur.strip().upper()}", fg="green")
     click.echo()
 
     # ── Step 9: OAuth login ──────────────────────────────────
@@ -541,7 +574,7 @@ def _finish_setup():
 def doctor(as_json):
     """Run local CLI readiness checks."""
     checks = [
-        {"check": "project_root", "status": "ok" if PROJECT_ROOT.exists() else "fail", "detail": str(PROJECT_ROOT)},
+        {"check": "scope", "status": "ok", "detail": f"{SCOPE_TYPE} → {SCOPE_ROOT}"},
         {"check": "credentials", "status": "ok" if CREDS_PATH.exists() else "fail", "detail": str(CREDS_PATH)},
         {"check": "database", "status": "ok" if DB_PATH.exists() else "fail", "detail": str(DB_PATH)},
         {"check": "developer_token", "status": "ok" if DEV_TOKEN else "fail", "detail": "set" if DEV_TOKEN else "missing — set GOOGLE_ADS_DEVELOPER_TOKEN"},
