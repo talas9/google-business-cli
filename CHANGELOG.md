@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-03-27
+
+### Added
+- **`GADS_CURRENCY`** env var for configurable currency (ISO 4217, default: USD)
+- **Dynamic versioning**: `__version__` in `gads_lib/__init__.py` is the single source of truth
+- Currency shown in `doctor` and `auth status` output
+
+### Changed
+- CLI logic moved into `gads_lib/cli.py` — proper Python module, pip install works correctly
+- `gads` root script is now a thin shim importing from `gads_lib.cli`
+- `pyproject.toml` reads version dynamically from `gads_lib.__version__`
+- DB columns: `cost_aed` → `cost`, `budget_aed` → `budget` (generic, currency-agnostic)
+
+### Fixed
+- `pip install` now works — was broken by invalid build backend and missing CLI module
+
 ## [2.0.0] - 2026-03-26
 
 ### Added

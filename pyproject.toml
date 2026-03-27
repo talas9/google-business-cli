@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "google-business-cli"
-version = "2.0.0"
+dynamic = ["version"]
 description = "Unified CLI for Google Ads, Business Profile, Merchant Center, and GA4"
 readme = "README.md"
 license = {text = "MIT"}
@@ -49,5 +49,5 @@ Issues = "https://github.com/talas9/google-business-cli/issues"
 [tool.setuptools.packages.find]
 include = ["gads_lib*"]
 
-[tool.setuptools]
-script-files = ["gads"]
+[tool.setuptools.dynamic]
+version = {attr = "gads_lib.__version__"}
