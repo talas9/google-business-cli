@@ -8,6 +8,9 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
+[![CI](https://github.com/talas9/gads-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/talas9/gads-cli/actions/workflows/ci.yml)
+
+---
 
 ## Features
 
@@ -40,315 +43,238 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 - Agent caller enforcement for multi-agent architectures (optional)
 - Configurable timezone (IANA) and currency (ISO 4217)
 
+---
+
 ## Install
 
-One command — downloads the CLI, detects your AI platforms (Claude Code, gsd-pi, ruflo), installs agents + skills + hooks, and runs auth setup:
+### One-liner (recommended)
+
+```bash
+pip install git+https://github.com/talas9/gads-cli.git
+```
+
+### Interactive installer
+
+Downloads the CLI, detects your AI platforms (Claude Code, gsd-pi), wires up agents + skills, and runs auth setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/talas9/gads-cli/main/scripts/install.sh | bash
 ```
 
-The installer is interactive. It will:
-1. Download the CLI to `~/.gads-cli/`
-2. Install Python dependencies
-3. Detect Claude Code, gsd-pi, and ruflo
-4. Ask which platforms to wire up (global or project scope)
-5. Install a specialized `google-platform-operator` agent + `gads-cli` skill + update hook
-6. Run the OAuth setup wizard
-
-### Manual Setup
-
-If you prefer manual installation:
+### From source
 
 ```bash
 git clone https://github.com/talas9/gads-cli.git
 cd gads-cli
 pip install .
-cp .env.example .env && $EDITOR .env
-python generate_token.py
-./gads doctor
 ```
 
-## Setup
-
-### 1. Prerequisites
-
-- Python 3.10+
-- A Google Cloud project with APIs enabled (see below)
-- OAuth 2.0 client credentials (`client_secret.json`)
-- A Google Ads developer token (from a [Manager Account / MCC](https://ads.google.com/intl/en/home/tools/manager-accounts/)) — **required for all Google Ads API commands**, but not needed for GBP, Merchant Center, or GA4
-
-### Google Cloud Project Setup
-
-1. **Create a project** (if you don't have one): [console.cloud.google.com/projectcreate](https://console.cloud.google.com/projectcreate)
-
-2. **Enable APIs** — click each link and click "ENABLE":
-
-   | API | Required for | Link |
-   |-----|-------------|------|
-   | Google Ads API | **Required** — all ads commands | [Enable](https://console.cloud.google.com/apis/library/googleads.googleapis.com) |
-   | My Business Account Mgmt API | GBP commands | [Enable](https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com) |
-   | My Business Business Info API | GBP location details | [Enable](https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com) |
-   | My Business v4 (legacy) | GBP reviews, posts, media | [Enable](https://console.cloud.google.com/apis/library/mybusiness.googleapis.com) |
-   | Content API for Shopping | Merchant Center commands | [Enable](https://console.cloud.google.com/apis/library/content.googleapis.com) |
-   | GA4 Data API | GA4 reports and realtime | [Enable](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) |
-   | GA4 Admin API | GA4 property metadata | [Enable](https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com) |
-
-   > You only need to enable the APIs for services you'll use. Google Ads API is required; the rest are optional.
-
-3. **Configure OAuth consent screen**:
-   - Go to [APIs & Services → OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
-   - User Type: **External** (unless you have Google Workspace → Internal)
-   - App name: anything (e.g. `gads-cli`)
-   - User support email & developer contact: your email
-   - Click "SAVE AND CONTINUE" through Scopes
-   - On **Test Users**: add your Google account email
-   - Click "SAVE AND CONTINUE" → "BACK TO DASHBOARD"
-   - Your app stays in "Testing" mode — this is fine, you do NOT need to publish or verify it
-
-4. **Create OAuth credentials**:
-   - Go to [APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials)
-   - Click **+ CREATE CREDENTIALS** → **OAuth client ID**
-   - Application type: **Desktop app**
-   - Name: anything (e.g. `gads-cli`)
-   - Click **CREATE**, then **DOWNLOAD JSON**
-   - Save the file as `credentials/client_secret.json` in your project
-
-### Developer Token Access Levels
-
-Your Google Ads developer token determines which API features you can use and how many operations you can perform daily:
-
-| Level | Approval | Ops/day | Production | Features | Notes |
-|-------|----------|---------|------------|----------|-------|
-| **Test Account** | Instant | 15,000 | Test only | All basic features | Free tier for testing |
-| **Explorer** | Auto-granted in some cases | 2,880 prod / 15,000 test | Yes | Most features | Sufficient for basic automation |
-| **Basic Access** | Apply, ~2 biz days | 15,000 | Yes | Campaign mgmt, audience mgmt, reporting, keyword research | Most users need this level |
-| **Standard Access** | Apply, ~10 biz days | Unlimited | Yes | Everything in Basic + Keyword Planner, Audience Insights, Reach Planner, Billing | Required for advanced features |
-
-### Developer Token is REQUIRED
-
-**For Google Ads API commands:** Developer token is absolutely required. It is NOT optional. Without it, ALL Google Ads operations will fail.
-
-**For other services:** GBP, Merchant Center, and GA4 commands do NOT require a developer token — they only need OAuth credentials.
-
-### Restricted Features (Require Standard Access)
-
-These features require Standard Access level:
-- **Keyword Planner** — `gads keyword ideas`, generate keyword ideas with search volume estimates
-- **Keyword Forecasting** — `gads keyword forecast`, forecast search volume and CPC
-- **Audience Insights** — audience composition and demographics
-- **Reach & Frequency Planner** — media buying planning
-- **Billing API** — PaymentsAccountService, BillingSetupService, InvoiceService
-- **Account Creation** — CustomerService.CreateCustomerClient (creating new ad accounts)
-- **User Management** — CustomerUserAccessService (granting users account access)
-
-### Important: Customer Match API Deprecation (April 1, 2026)
-
-**Starting April 1, 2026, uploading Customer Match data via `OfflineUserDataJobService` will fail if your developer token has never sent a successful Customer Match request before.** 
-
-If you plan to use `gads audience upload`, either:
-1. Upload before April 1, 2026 to establish token eligibility, OR
-2. Use the Data Manager API instead (requires different OAuth scopes and API calls)
-
-### How to Get Your Developer Token
-
-1. **Create a Manager (MCC) account** if you don't have one — developer tokens are created from manager accounts, NOT from regular Google Ads accounts:
-   - Go to [ads.google.com/intl/en/home/tools/manager-accounts](https://ads.google.com/intl/en/home/tools/manager-accounts/)
-   - Create a manager account (free, takes 2 minutes)
-   - Link your Google Ads account(s) to the manager account
-
-2. **Log into your manager account** and go to [Google Ads API Center](https://ads.google.com/aw/apicenter)
-
-3. **Apply for access:**
-   - If you see "Apply for Basic Access" → apply and wait for approval (1-3 business days)
-   - If you're already approved, your developer token is displayed
-
-4. **For Keyword Planner features only:** After Basic Access is approved, apply for Standard Access. Google reviews your API usage history and this typically takes 1-4 weeks.
-
-5. **Copy your developer token** and set `GOOGLE_ADS_DEVELOPER_TOKEN` in your `.env`
-
-> **Important:** The developer token lives in your *manager account* (MCC). The `GOOGLE_ADS_LOGIN_CUSTOMER_ID` in your `.env` should be set to the manager account's customer ID. The `GOOGLE_ADS_CUSTOMER_ID` is the actual ad account you want to manage.
-
-### 2. Install
-
-**Option A: pip install (recommended)**
-```bash
-pip install .
-```
-
-**Option B: Direct dependencies**
-```bash
-pip install click requests google-auth google-auth-oauthlib python-dotenv
-```
-
-### 3. Configure
+### Upgrade
 
 ```bash
-cp .env.example .env
+pip install --upgrade git+https://github.com/talas9/gads-cli.git
 ```
 
-Edit `.env` with your values. At minimum you need:
-```bash
-GOOGLE_ADS_DEVELOPER_TOKEN=your-developer-token
-GOOGLE_ADS_CUSTOMER_ID=1234567890    # 10 digits, no dashes
-```
-
-### 4. Generate OAuth token
-
-Place your `client_secret.json` in the `credentials/` directory, then:
+### Pin a version
 
 ```bash
-python generate_token.py
+pip install git+https://github.com/talas9/gads-cli.git@v3.2.0
 ```
 
-This opens a browser for Google sign-in and generates `credentials/google-ads-oauth.json` with scopes for all four services (Ads, GBP, Merchant Center, GA4).
+---
 
-### 5. Verify
+## Quick Start
 
 ```bash
-./gads doctor
+# 1. Run the interactive setup wizard (walks through everything)
+gads auth setup
+
+# 2. Verify
+gads doctor
+
+# 3. Try it
+gads campaign list
+gads perf --days 7
+gads query "SELECT campaign.name, metrics.clicks FROM campaign"
 ```
+
+The setup wizard handles: GCP project creation, API enablement, OAuth consent screen, credential download, developer token, customer IDs, timezone, currency, and OAuth login — all interactively.
+
+If you prefer manual setup, see [Manual Setup](#manual-setup) below.
+
+---
 
 ## Command Reference
 
-### Core Commands
-
-| Command | Description |
-|---------|-------------|
-| `gads doctor` | Check credentials, API access, and configuration |
-| `gads auth status` | Show credential status (never prints secrets) |
-| `gads --version` | Show CLI version |
-
-### Google Ads
+### Core
 
 ```bash
-# Run any GAQL query
-gads query "SELECT campaign.name, metrics.clicks FROM campaign"
+gads doctor                          # Check credentials, config, API access
+gads auth status --json              # Credential status (never prints secrets)
+gads accounts                        # List accessible Google Ads accounts
+gads query "SELECT campaign.name FROM campaign"  # Run any GAQL query
+gads perf --days 7                   # Performance from local database
+gads config --json                   # Campaign configs from API
+gads refresh --days 3                # Pull API data into local DB
+gads snapshot pre-change --save-file # Snapshot configs before mutations
+gads log "action" "details"          # Append to changelog
+```
 
-# Performance from local database
-gads perf --days 7
-gads perf --campaign "my-campaign" --json
+### Campaign Management
 
-# Pull fresh data from API into local DB
-gads refresh --days 3
-gads refresh --days 7 --config --push
+```bash
+gads campaign list                   # All campaigns with status/budget
+gads campaign perf --days 7          # Campaign metrics from API
+gads campaign status 12345 PAUSED    # Pause a campaign (--dry-run, --yes)
+gads campaign budget 12345 25.00     # Change daily budget (--dry-run, --yes)
+```
 
-# Snapshot campaign configs before making changes
-gads snapshot pre-budget-change --save-file
+### Ad Groups & Ads
 
-# Log a change to the changelog
-gads log "budget_change" "PMax budget 25→30" --reason "Strong CPA"
+```bash
+gads adgroup list --campaign 12345   # List ad groups in a campaign
+gads adgroup create 12345 "My Group" # Create ad group
+gads adgroup status 67890 PAUSED     # Pause an ad group
+gads ad list --campaign 12345        # List ads with creatives
+gads ad perf --days 7                # Ad-level performance
+gads ad status 67890 11111 PAUSED    # Pause an ad
+```
 
-# Show current campaign configs from API
-gads config --json
+### Keywords
+
+```bash
+gads keyword list --campaign 12345 --days 30  # Keyword performance
+gads keyword add 67890 "tesla parts" -m PHRASE  # Add keyword to ad group
+gads keyword remove 67890 99999               # Remove by criterion ID
+gads keyword negative 12345 "free" -m BROAD   # Add negative keyword
+gads keyword search-terms --days 7 --min-clicks 2  # Search terms report
+gads keyword ideas -k "tesla parts,used parts" --geo 2784  # Keyword Planner ★
+gads keyword forecast -k "tesla parts" --geo 2784           # Volume forecast ★
+```
+
+### Assets & Extensions
+
+```bash
+gads asset list                      # List all assets
+gads asset list --type SITELINK      # Filter by type
+gads asset sitelink 12345 --link-text "Contact Us" --url "https://..." --desc1 "..."
+gads asset callout 12345 --text "Free Shipping"
+gads asset call 12345 --phone "+1234567890" --country-code US
+```
+
+### Conversions
+
+```bash
+gads conversion list                 # All conversion actions
+gads conversion perf --days 7        # Performance by conversion action
+gads conversion tag 12345            # Get tracking snippet
+gads conversion create "My Action" --type WEBPAGE
+gads conversion upload --gclid xxx --action-id yyy --time "2026-03-27T12:00:00"
+```
+
+### Audiences (Customer Match)
+
+```bash
+gads audience list                   # All user lists with sizes/match rates
+gads audience create "My List" --life-span 540
+gads audience upload data.csv --list-name "My List" --create  # Full pipeline
+gads audience job-status 12345       # Check upload job status
+```
+
+CSV format: `Phone,Email,First Name,Last Name,Country` — all PII is SHA-256 hashed automatically.
+
+### Reports
+
+```bash
+gads report geo --days 7             # Geographic breakdown
+gads report hourly --days 7          # Hourly performance
+gads report devices --days 7         # Device breakdown
+gads report search-terms --days 7    # Search terms report
+```
+
+### Generic Mutations (escape hatch)
+
+```bash
+gads mutate campaigns '[{"update": {"resourceName": "...", "status": "PAUSED"}, "updateMask": "status"}]'
+gads batch-mutate '[{"campaignOperation": {"update": ...}}]'
 ```
 
 ### Google Business Profile
 
 ```bash
-# List all GBP accounts
 gads gbp accounts
-
-# List locations for an account
 gads gbp locations --account accounts/123456789
-
-# Get a specific location's details
 gads gbp location locations/987654321
-
-# List reviews for a location
 gads gbp reviews locations/987654321
-
-# Reply to a review
 gads gbp reply-review accounts/123/locations/456/reviews/789 "Thank you!"
-
-# Delete a review reply
 gads gbp delete-reply accounts/123/locations/456/reviews/789
 ```
 
 ### Google Merchant Center
 
 ```bash
-# Account info
-gads merchant account
-
-# Account diagnostics and issues
-gads merchant status
-
-# List products
-gads merchant products --limit 50
-
-# Product approval statuses
-gads merchant product-status
-
-# Data feeds
-gads merchant feeds
-
-# Shipping settings
-gads merchant shipping
-
-# Return policies
-gads merchant returns
+gads merchant account                # Account info
+gads merchant status                 # Account issues
+gads merchant products --limit 50    # Product listings
+gads merchant product-status         # Approval statuses
+gads merchant feeds                  # Data feeds
+gads merchant shipping               # Shipping settings
+gads merchant returns                # Return policy
 ```
 
 ### Google Analytics (GA4)
 
 ```bash
-# Available dimensions and metrics
-gads ga4 metadata
-
-# Run a report
-gads ga4 report --dimensions date --metrics activeUsers,sessions --start 7daysAgo --end yesterday
-
-# Real-time data
-gads ga4 realtime --dimensions country --metrics activeUsers
+gads ga4 metadata                    # Available dimensions/metrics
+gads ga4 report -d date -m activeUsers,sessions --start 7daysAgo
+gads ga4 realtime -d country -m activeUsers
 ```
 
-### Automation
+### Automation (cron)
 
 ```bash
-# Daily data fetch (use with cron)
-python fetch_daily.py --days 3
-python fetch_daily.py --days 7 --config --push
+# Daily data fetch
+python fetch_daily.py --days 3 --push
 
-# Cron example (fetch at 3:30 AM daily):
-# 30 3 * * * cd /path/to/project && python gads-cli/fetch_daily.py --days 3 --push
+# Cron example (3:30 AM daily)
+30 3 * * * cd /path/to/project && gads refresh --days 3 --push
 ```
 
-## Configuration Reference
+---
 
-| Variable | Required For | Scope | Description |
-|----------|----------|---------|-------------|
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API commands | Google Ads only | Developer token from [Google Ads API Center](https://ads.google.com/aw/apicenter) — absolutely required for ALL ads operations |
-| `GOOGLE_ADS_CUSTOMER_ID` | Google Ads API commands | Google Ads only | 10-digit account ID (no dashes) |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | MCC/manager setups | Google Ads only | Manager (MCC) account ID — required if using multi-account setup |
-| `GOOGLE_ADS_API_VERSION` | Optional | Google Ads | Default: `v19` |
-| `GOOGLE_MERCHANT_CENTER_ID` | Merchant Center commands | Merchant Center | Account ID from Merchant Center dashboard |
-| `GOOGLE_GA4_PROPERTY_ID` | GA4 commands | GA4 | Property ID (digits only) — e.g. `271773771` |
-| `GADS_TIMEZONE` | Optional | All | IANA timezone (default: `UTC`, examples: `America/New_York`, `Asia/Dubai`, `Europe/London`) |
-| `GADS_CURRENCY` | Optional | All | ISO 4217 currency code (default: `USD`, examples: `AED`, `EUR`, `GBP`) |
-| `GADS_PROJECT_ROOT` | Optional | All | Project root directory override — auto-detected if not set |
-| `GADS_DB_PATH` | Optional | All | SQLite database path (default: `../data/gads.db`) |
-| `GADS_CREDENTIALS_PATH` | Optional | All | OAuth token path (default: `../credentials/google-ads-oauth.json`) |
-| `GADS_SNAPSHOTS_DIR` | Optional | All | Snapshot output directory (default: `../snapshots`) |
+## Configuration
 
-### Command Requirements
+All configuration via environment variables or `.env` file. See [`.env.example`](.env.example).
 
-| Commands | Needs dev token? | Needs OAuth? | Min access level |
-|----------|-----------------|-------------|-----------------|
-| `gads gbp *` | No | Yes (business.manage) | N/A |
-| `gads merchant *` | No | Yes (content) | N/A |
-| `gads ga4 *` | No | Yes (analytics.readonly) | N/A |
-| `gads query`, `perf`, `config`, `refresh`, `snapshot`, `log` | Yes | Yes (adwords) | Explorer |
-| `gads campaign *`, `gads adgroup *`, `gads ad *`, `gads conversion *`, `gads audience list`, `gads report *` | Yes | Yes (adwords) | Explorer |
-| `gads keyword add`, `keyword remove`, `keyword negative`, `keyword search-terms` | Yes | Yes (adwords) | Explorer |
-| `gads keyword ideas` | Yes | Yes (adwords) | **Standard** |
-| `gads keyword forecast` | Yes | Yes (adwords) | **Standard** |
-| `gads audience upload` | Yes | Yes (adwords) | Basic (note: April 2026 Customer Match deprecation) |
-| `gads asset *`, `gads campaign budget`, `gads campaign status`, `gads adgroup create`, `gads adgroup status` | Yes | Yes (adwords) | Explorer |
+### Required vs Optional
 
-### Agent Enforcement (Optional)
+| Variable | Required for | Description |
+|----------|-------------|-------------|
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | **All Google Ads commands** | Developer token from [API Center](https://ads.google.com/aw/apicenter) |
+| `GOOGLE_ADS_CUSTOMER_ID` | **All Google Ads commands** | 10-digit account ID (no dashes) |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | MCC setups | Manager account ID |
+| `GOOGLE_MERCHANT_CENTER_ID` | Merchant Center commands | MC account ID |
+| `GOOGLE_GA4_PROPERTY_ID` | GA4 commands | Property ID (digits only) |
+| `GADS_TIMEZONE` | Optional (default: `UTC`) | IANA timezone (e.g. `America/New_York`) |
+| `GADS_CURRENCY` | Optional (default: `USD`) | ISO 4217 code (e.g. `AED`, `EUR`) |
+| `GOOGLE_ADS_API_VERSION` | Optional (default: `v19`) | API version |
 
-For multi-agent setups where you want to restrict CLI access to a specific agent:
+> **GBP, Merchant Center, and GA4 commands do NOT need a developer token** — only OAuth credentials.
+
+### Which commands need what
+
+| Commands | Dev token | OAuth scope | Min access level |
+|----------|-----------|-------------|-----------------|
+| `gbp *` | No | `business.manage` | — |
+| `merchant *` | No | `content` | — |
+| `ga4 *` | No | `analytics.readonly` | — |
+| `query`, `perf`, `campaign *`, `adgroup *`, `ad *`, `report *` | Yes | `adwords` | Explorer |
+| `keyword add/remove/negative/search-terms` | Yes | `adwords` | Explorer |
+| `keyword ideas`, `keyword forecast` | Yes | `adwords` | **Standard** |
+| `audience upload` | Yes | `adwords` | Basic |
+| `campaign status/budget`, `asset *`, `mutate *` | Yes | `adwords` | Explorer |
+
+### Agent Enforcement (optional)
 
 ```bash
 GADS_ENFORCE_CALLER=1
@@ -356,58 +282,132 @@ GADS_EXPECTED_CALLER=my-operator-agent
 GADS_CALLER_AGENT=my-operator-agent  # Set by the calling agent
 ```
 
-When `GADS_ENFORCE_CALLER=1`, the CLI verifies `GADS_CALLER_AGENT` matches `GADS_EXPECTED_CALLER` before executing any command.
+---
+
+## Manual Setup
+
+If you prefer not to use `gads auth setup`, here's the manual process:
+
+### 1. Prerequisites
+
+- Python 3.10+
+- A [Google Cloud project](https://console.cloud.google.com/projectcreate)
+- A [Google Ads Manager (MCC) account](https://ads.google.com/intl/en/home/tools/manager-accounts/) for the developer token
+
+### 2. Enable APIs
+
+Click each link → click "ENABLE" (only enable what you need):
+
+| API | For | Link |
+|-----|-----|------|
+| Google Ads API | **Required** | [Enable](https://console.cloud.google.com/apis/library/googleads.googleapis.com) |
+| My Business Account Mgmt API | GBP | [Enable](https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com) |
+| My Business Business Info API | GBP | [Enable](https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com) |
+| My Business v4 (legacy) | GBP reviews | [Enable](https://console.cloud.google.com/apis/library/mybusiness.googleapis.com) |
+| Content API for Shopping | Merchant Center | [Enable](https://console.cloud.google.com/apis/library/content.googleapis.com) |
+| GA4 Data API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com) |
+| GA4 Admin API | GA4 | [Enable](https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com) |
+
+### 3. OAuth Consent Screen
+
+1. Go to [OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+2. User Type: **External**
+3. App name, support email, developer contact → fill in
+4. Scopes → skip
+5. Test Users → **add your Google account email**
+6. Save → your app stays in "Testing" mode (fine, no need to publish)
+
+### 4. OAuth Credentials
+
+1. Go to [Credentials](https://console.cloud.google.com/apis/credentials)
+2. **+ CREATE CREDENTIALS** → **OAuth client ID** → **Desktop app**
+3. **DOWNLOAD JSON** → save as `credentials/client_secret.json`
+
+### 5. Developer Token
+
+Developer tokens are created from **Manager (MCC) accounts**, not regular ad accounts.
+
+1. [Create an MCC](https://ads.google.com/intl/en/home/tools/manager-accounts/) if you don't have one
+2. Link your ad account(s) to it
+3. Go to [API Center](https://ads.google.com/aw/apicenter) in the MCC
+4. Apply for Basic Access (1-3 days approval)
+5. Copy the token → set `GOOGLE_ADS_DEVELOPER_TOKEN` in `.env`
+
+#### Access Levels
+
+| Level | Approval | Ops/day | What you get |
+|-------|----------|---------|-------------|
+| **Test** | Instant | 15,000 | Test accounts only |
+| **Explorer** | Auto | 2,880 prod | Most features — sufficient for basic automation |
+| **Basic** | ~2 days | 15,000 | Production access, most CLI commands |
+| **Standard** | ~10 days | Unlimited | + Keyword Planner, Audience Insights, Reach Planner, Billing |
+
+### 6. Configure & Login
+
+```bash
+cp .env.example .env   # Edit with your values
+gads auth login        # Opens browser for OAuth
+gads doctor            # Verify everything
+```
+
+> ⚠️ **Customer Match deprecation:** Starting April 1, 2026, `audience upload` will fail if your token has never sent a successful Customer Match request. Upload before that date or switch to Data Manager API.
+
+---
 
 ## Architecture
 
 ```
 gads-cli/
-├── gads                  # Main CLI entry point (Click)
+├── gads                  # CLI entry point (thin shim)
 ├── gads.sh               # Shell wrapper with .env loading
 ├── gads_lib/
-│   ├── __init__.py       # Public API — re-exports all modules
-│   ├── cli.py            # Entry point for pip-installed command
-│   ├── config.py         # Environment-driven configuration
+│   ├── __init__.py       # Version + public API exports
+│   ├── cli.py            # All Click command groups (65 commands)
+│   ├── config.py         # Scope-aware env config
 │   ├── auth.py           # OAuth credential management
-│   ├── http.py           # HTTP helpers with auth headers
-│   ├── ads.py            # Google Ads GAQL client
-│   ├── gbp.py            # Google Business Profile client
+│   ├── ads.py            # Google Ads REST client + GAQL + mutations
+│   ├── gbp.py            # GBP client (3 base URLs)
 │   ├── merchant.py       # Merchant Center client
 │   ├── ga4.py            # GA4 Data API client
+│   ├── http.py           # HTTP helpers with auth headers
 │   ├── db.py             # SQLite connection manager
 │   ├── output.py         # Table/JSON formatters
-│   └── timeutil.py       # Timezone-aware time helpers
+│   └── timeutil.py       # Timezone-aware helpers
 ├── fetch_daily.py        # Cron-friendly daily data fetcher
 ├── generate_token.py     # OAuth token generator (4 scopes)
-├── pyproject.toml        # Python package configuration
+├── scripts/install.sh    # Interactive installer
+├── .github/workflows/    # CI pipeline
+├── pyproject.toml        # Package metadata
 ├── .env.example          # Configuration template
-├── CLAUDE.md             # Claude Code project context
+├── CLAUDE.md             # AI agent reference
 ├── CHANGELOG.md          # Version history
-└── README.md             # This file
+└── README.md
 ```
+
+Uses Google REST APIs directly (`requests` + `google-auth`) — no protobuf, no `google-ads` client library.
+
+---
 
 ## Using with Claude Code
 
-This CLI is designed to work seamlessly with [Claude Code](https://claude.ai/code). The included `CLAUDE.md` provides Claude with full context about the CLI's commands, architecture, and configuration.
+The included `CLAUDE.md` gives Claude full context about commands, auth, and known gotchas.
 
 ```bash
-# Claude can use the CLI directly:
 claude "Run gads perf --days 7 and analyze the trends"
 claude "Check my GBP reviews and draft replies for any negative ones"
 claude "Pull fresh data and compare this week vs last week"
 ```
 
-For automated agent workflows, use the agent enforcement feature to restrict CLI access to a designated operator agent.
+---
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Run the doctor check (`./gads doctor`)
-5. Commit and push
-6. Open a Pull Request
+1. Fork → feature branch → make changes
+2. `gads doctor` to verify
+3. Push → open PR
+
+CI runs Python 3.10-3.13 on Ubuntu + macOS automatically.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
