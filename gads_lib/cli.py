@@ -1183,6 +1183,163 @@ def gbp_metrics_list():
         click.echo(f"  {m}")
 
 
+@gbp.command("ads-perf")
+@click.option("-d", "--days", default=30, type=click.IntRange(1, 90), help="Lookback days (default 30)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def gbp_ads_perf(days, as_json):
+    """Location asset performance in Google Ads (per-branch breakdown).
+
+    Shows how each GBP location performs as a location extension
+    across all campaigns. Matches the Ads UI Asset Report > Associations > Location view.
+    """
+    enforce_allowed_caller()
+    creds = get_credentials()
+
+    # Find the active LOCATION_SYNC asset set
+    sets = run_gaql(creds, """
+        SELECT asset_set.id, asset_set.name
+        FROM asset_set
+        WHERE asset_set.type = LOCATION_SYNC
+          AND asset_set.status = ENABLED
+    """)
+    if not sets:
+        click.secho("✗ No active LOCATION_SYNC asset set found", fg="red")
+        raise SystemExit(1)
+    asset_set_id = sets[0]["assetSet"]["id"]
+
+    end = _today_date() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+
+    rows = run_gaql(creds, f"""
+        SELECT asset.location_asset.place_id,
+               asset.location_asset.business_profile_locations,
+               metrics.clicks, metrics.impressions, metrics.cost_micros,
+               metrics.conversions, metrics.all_conversions
+        FROM asset_set_asset
+        WHERE asset_set.id = {asset_set_id}
+          AND segments.date BETWEEN "{start}" AND "{end}"
+        ORDER BY metrics.clicks DESC
+    """)
+
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, ensure_ascii=False))
+        return
+
+    if not rows:
+        click.echo("  No location asset data found.")
+        return
+
+    result_rows = []
+    for r in rows:
+        m = r["metrics"]
+        loc = r.get("asset", {}).get("locationAsset", {})
+        bpl = loc.get("businessProfileLocations", [])
+        code = bpl[0].get("storeCode", "?") if bpl else loc.get("placeId", "?")[:12]
+        clicks = int(m.get("clicks", 0))
+        impr = int(m.get("impressions", 0))
+        cost = int(m.get("costMicros", 0)) / 1e6
+        ctr = (clicks / impr * 100) if impr > 0 else 0
+        avg_cpc = (cost / clicks) if clicks > 0 else 0
+        conv = float(m.get("conversions", 0))
+        allconv = float(m.get("allConversions", 0))
+        result_rows.append({
+            "location": code,
+            "clicks": clicks,
+            "impr": impr,
+            "ctr": f"{ctr:.2f}%",
+            "avg_cpc": f"{CURRENCY}{avg_cpc:.2f}",
+            "cost": f"{CURRENCY}{cost:.2f}",
+            "conv": f"{conv:.0f}",
+            "all_conv": f"{allconv:.0f}",
+        })
+
+    print_table(result_rows, ["location", "clicks", "impr", "ctr", "avg_cpc", "cost", "conv", "all_conv"])
+
+
+@gbp.command("ads-daily")
+@click.option("-d", "--days", default=14, type=click.IntRange(1, 90), help="Lookback days (default 14)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def gbp_ads_daily(days, as_json):
+    """Daily location asset performance in Google Ads (per-branch per-day).
+
+    Shows daily clicks, impressions, cost for each GBP location as ad extension.
+    """
+    enforce_allowed_caller()
+    creds = get_credentials()
+
+    sets = run_gaql(creds, """
+        SELECT asset_set.id
+        FROM asset_set
+        WHERE asset_set.type = LOCATION_SYNC
+          AND asset_set.status = ENABLED
+    """)
+    if not sets:
+        click.secho("✗ No active LOCATION_SYNC asset set found", fg="red")
+        raise SystemExit(1)
+    asset_set_id = sets[0]["assetSet"]["id"]
+
+    end = _today_date() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+
+    rows = run_gaql(creds, f"""
+        SELECT asset.location_asset.business_profile_locations,
+               segments.date,
+               metrics.clicks, metrics.impressions, metrics.cost_micros,
+               metrics.conversions
+        FROM asset_set_asset
+        WHERE asset_set.id = {asset_set_id}
+          AND segments.date BETWEEN "{start}" AND "{end}"
+        ORDER BY segments.date DESC
+    """)
+
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, ensure_ascii=False))
+        return
+
+    if not rows:
+        click.echo("  No data found.")
+        return
+
+    # Group by date → location
+    from collections import defaultdict
+    by_date = defaultdict(dict)
+    locations = set()
+    for r in rows:
+        m = r["metrics"]
+        bpl = r.get("asset", {}).get("locationAsset", {}).get("businessProfileLocations", [])
+        code = bpl[0].get("storeCode", "?") if bpl else "?"
+        locations.add(code)
+        d = r["segments"]["date"]
+        by_date[d][code] = {
+            "clicks": int(m.get("clicks", 0)),
+            "impr": int(m.get("impressions", 0)),
+            "cost": int(m.get("costMicros", 0)) / 1e6,
+            "conv": float(m.get("conversions", 0)),
+        }
+
+    locations = sorted(locations)
+    result_rows = []
+    for d in sorted(by_date.keys()):
+        row = {"date": d}
+        total_clk = total_cost = total_conv = 0
+        for loc in locations:
+            data = by_date[d].get(loc, {})
+            clk = data.get("clicks", 0)
+            cost = data.get("cost", 0)
+            conv = data.get("conv", 0)
+            row[loc] = clk
+            total_clk += clk
+            total_cost += cost
+            total_conv += conv
+        row["total_clk"] = total_clk
+        row[f"cost_{CURRENCY}"] = f"{total_cost:.2f}"
+        row["conv"] = f"{total_conv:.0f}"
+        result_rows.append(row)
+
+    cols = ["date"] + locations + ["total_clk", f"cost_{CURRENCY}", "conv"]
+    print_table(result_rows, cols)
+
+
 # ── Search Console commands ──────────────────────────────────
 
 @cli.group()
