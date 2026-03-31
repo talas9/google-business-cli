@@ -14,7 +14,7 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 
 ## Features
 
-**65 commands** across 14 groups covering the full Google Ads operational surface:
+**73 commands** across 15 groups covering the full Google Ads operational surface:
 
 | Group | Commands | Description |
 |-------|----------|-------------|
@@ -28,7 +28,8 @@ Built for AI coding agents (Claude Code, Cursor, etc.) and human operators. Ever
 | **Audience** | `audience list`, `create`, `upload`, `job-status` | Customer Match user lists, CSV upload with SHA-256 hashing + consent |
 | **Report** | `report geo`, `hourly`, `devices`, `search-terms` | Geographic, hourly, device, and search term performance breakdowns |
 | **Mutate** | `mutate <type> <json>`, `batch-mutate <json>` | Generic escape hatch for any Google Ads API mutation |
-| **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply` | Google Business Profile management — no dev token needed |
+| **GBP** | `gbp accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list` | Google Business Profile management + performance analytics |
+| **GSC** | `gsc sites`, `queries`, `pages`, `performance` | Google Search Console — search queries, pages, daily performance |
 | **Merchant** | `merchant account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center diagnostics — no dev token needed |
 | **GA4** | `ga4 report`, `realtime`, `metadata` | Google Analytics 4 reporting — no dev token needed |
 | **Auth** | `auth status`, `setup`, `login`, `revoke`, `test` | Interactive setup wizard, OAuth flow, credential diagnostics |
@@ -259,13 +260,15 @@ All configuration via environment variables or `.env` file. See [`.env.example`]
 | `GADS_CURRENCY` | Optional (default: `USD`) | ISO 4217 code (e.g. `AED`, `EUR`) |
 | `GOOGLE_ADS_API_VERSION` | Optional (default: `v19`) | API version |
 
-> **GBP, Merchant Center, and GA4 commands do NOT need a developer token** — only OAuth credentials.
+> **GBP, GSC, Merchant Center, and GA4 commands do NOT need a developer token** — only OAuth credentials.
 
 ### Which commands need what
 
 | Commands | Dev token | OAuth scope | Min access level |
 |----------|-----------|-------------|-----------------|
-| `gbp *` | No | `business.manage` | — |
+| `gbp accounts/locations/reviews/reply-review/delete-reply` | No | `business.manage` | — |
+| `gbp perf/perf-all/search-keywords/metrics-list` | No | `business.manage` | — |
+| `gsc *` | No | `webmasters.readonly` | — |
 | `merchant *` | No | `content` | — |
 | `ga4 *` | No | `analytics.readonly` | — |
 | `query`, `perf`, `campaign *`, `adgroup *`, `ad *`, `report *` | Yes | `adwords` | Explorer |
@@ -362,7 +365,7 @@ gads-cli/
 ├── gads.sh               # Shell wrapper with .env loading
 ├── gads_lib/
 │   ├── __init__.py       # Version + public API exports
-│   ├── cli.py            # All Click command groups (65 commands)
+│   ├── cli.py            # All Click command groups (73 commands)
 │   ├── config.py         # Scope-aware env config
 │   ├── auth.py           # OAuth credential management
 │   ├── ads.py            # Google Ads REST client + GAQL + mutations
@@ -374,7 +377,7 @@ gads-cli/
 │   ├── output.py         # Table/JSON formatters
 │   └── timeutil.py       # Timezone-aware helpers
 ├── fetch_daily.py        # Cron-friendly daily data fetcher
-├── generate_token.py     # OAuth token generator (4 scopes)
+├── generate_token.py     # OAuth token generator (5 scopes)
 ├── scripts/install.sh    # Interactive installer
 ├── .github/workflows/    # CI pipeline
 ├── pyproject.toml        # Package metadata

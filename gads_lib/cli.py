@@ -44,6 +44,10 @@ from gads_lib import (
     gbp_list_locations,
     gbp_list_reviews,
     gbp_reply_review,
+    gbp_daily_metrics,
+    gbp_multi_daily_metrics,
+    gbp_search_keywords_monthly,
+    DAILY_METRICS,
     generate_keyword_ideas,
     generate_keyword_forecast,
     get_credentials,
@@ -64,6 +68,7 @@ from gads_lib import (
 
 
 from gads_lib import __version__
+from gads_lib.gsc import gsc_list_sites, gsc_search_analytics
 
 
 @click.group()
@@ -215,9 +220,11 @@ def auth_setup():
         ("My Business Account Mgmt API", "https://console.cloud.google.com/apis/library/mybusinessaccountmanagement.googleapis.com",        "For GBP",  "List accounts, manage locations"),
         ("My Business Business Info API", "https://console.cloud.google.com/apis/library/mybusinessbusinessinformation.googleapis.com",     "For GBP",  "Location details, hours, attributes"),
         ("My Business v4 (legacy)",       "https://console.cloud.google.com/apis/library/mybusiness.googleapis.com",                        "For GBP",  "Reviews, posts, media, Q&A"),
+        ("Business Profile Performance",  "https://console.cloud.google.com/apis/library/businessprofileperformance.googleapis.com",        "For GBP",  "Directions, calls, impressions, search keywords"),
         ("Content API for Shopping",      "https://console.cloud.google.com/apis/library/content.googleapis.com",                           "For MC",   "Products, feeds, shipping, returns"),
         ("GA4 Data API",                  "https://console.cloud.google.com/apis/library/analyticsdata.googleapis.com",                     "For GA4",  "Reports, realtime data"),
         ("GA4 Admin API",                 "https://console.cloud.google.com/apis/library/analyticsadmin.googleapis.com",                    "For GA4",  "Property metadata, account structure"),
+        ("Search Console API",            "https://console.cloud.google.com/apis/library/searchconsole.googleapis.com",                     "For GSC",  "Search queries, pages, click data"),
     ]
     for name, url, scope, desc in apis:
         click.echo(f"    • {name}")
@@ -531,6 +538,19 @@ def auth_test(as_json):
     else:
         results.append({"service": "GA4", "status": "skip", "detail": "GOOGLE_GA4_PROPERTY_ID not set"})
 
+    # Test Search Console
+    try:
+        creds = get_credentials()
+        sites = gsc_list_sites(creds)
+        count = len(sites.get("siteEntry", []))
+        results.append({"service": "Search Console", "status": "ok", "detail": f"{count} site(s) found"})
+    except Exception as e:
+        msg = str(e)[:100]
+        if "403" in msg or "insufficient" in msg.lower():
+            results.append({"service": "Search Console", "status": "fail", "detail": "403 — re-run 'gads auth login --force' to add webmasters scope"})
+        else:
+            results.append({"service": "Search Console", "status": "fail", "detail": msg})
+
     if as_json:
         print_json(results)
         return
@@ -575,6 +595,7 @@ def _do_oauth_login(client_secret_path, token_output_path, port=9090):
         "https://www.googleapis.com/auth/business.manage",
         "https://www.googleapis.com/auth/content",
         "https://www.googleapis.com/auth/analytics.readonly",
+        "https://www.googleapis.com/auth/webmasters.readonly",
     ]
 
     token_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -602,6 +623,7 @@ def _do_oauth_login(client_secret_path, token_output_path, port=9090):
         "https://www.googleapis.com/auth/business.manage": "Business Profile",
         "https://www.googleapis.com/auth/content": "Merchant Center",
         "https://www.googleapis.com/auth/analytics.readonly": "GA4 Analytics",
+        "https://www.googleapis.com/auth/webmasters.readonly": "Search Console",
     }
     click.echo("  Scopes granted:")
     for scope in SCOPES:
@@ -1018,6 +1040,235 @@ def gbp_delete_reply_cmd(review_name):
     enforce_allowed_caller()
     gbp_delete_reply(get_credentials(), review_name)
     click.secho(f"✓ Reply deleted", fg="green")
+
+
+# ── GBP Performance commands ─────────────────────────────────
+
+DEFAULT_PERF_METRICS = "BUSINESS_DIRECTION_REQUESTS,CALL_CLICKS,WEBSITE_CLICKS"
+
+
+def _normalize_location(loc):
+    """Prepend 'locations/' if only an ID is provided."""
+    if not loc.startswith("locations/"):
+        loc = f"locations/{loc}"
+    return loc
+
+
+def _today_date():
+    """Today as a date object in the configured timezone."""
+    from zoneinfo import ZoneInfo
+    from .config import TZ_NAME
+    return datetime.now(ZoneInfo(TZ_NAME)).date()
+
+
+@gbp.command("perf")
+@click.option("-l", "--location", required=True, help="Location ID or full name.")
+@click.option("-d", "--days", default=14, help="Days to look back.")
+@click.option("-m", "--metrics", default=DEFAULT_PERF_METRICS, help="Comma-separated daily metrics.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_perf(location, days, metrics, as_json):
+    """Daily performance metrics for a GBP location."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    loc = _normalize_location(location)
+    metric_list = [m.strip() for m in metrics.split(",")]
+    end = _today_date() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+
+    data = gbp_multi_daily_metrics(creds, loc, metric_list, start, end)
+    if as_json:
+        return print_json(data)
+
+    all_dates = set()
+    for vals in data.values():
+        for v in vals:
+            all_dates.add(v["date"])
+
+    rows = []
+    for d in sorted(all_dates):
+        row = {"date": d}
+        for m in metric_list:
+            vals = {v["date"]: v["value"] for v in data.get(m, [])}
+            row[m[:20]] = vals.get(d, 0)
+        rows.append(row)
+
+    cols = ["date"] + [m[:20] for m in metric_list]
+    print_table(rows, cols)
+
+
+@gbp.command("perf-all")
+@click.option("-d", "--days", default=14, help="Days to look back.")
+@click.option("-m", "--metrics", default=DEFAULT_PERF_METRICS, help="Comma-separated daily metrics.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_perf_all(days, metrics, as_json):
+    """Daily performance metrics for ALL GBP locations."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    metric_list = [m.strip() for m in metrics.split(",")]
+    end = _today_date() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+
+    accts = gbp_list_accounts(creds)
+    all_results = {}
+    for acct in accts.get("accounts", []):
+        if acct.get("type") != "LOCATION_GROUP":
+            continue
+        locs = gbp_list_locations(creds, acct["name"], read_mask="name,title")
+        for loc in locs.get("locations", []):
+            title = loc.get("title", loc["name"])
+            click.echo(f"  Fetching {title}...", err=True)
+            data = gbp_multi_daily_metrics(creds, loc["name"], metric_list, start, end)
+            all_results[title] = data
+
+    if as_json:
+        return print_json(all_results)
+
+    all_dates = set()
+    for loc_data in all_results.values():
+        for vals in loc_data.values():
+            for v in vals:
+                all_dates.add(v["date"])
+
+    loc_names = list(all_results.keys())
+    # Create short unique names for columns
+    short_names = {}
+    for name in loc_names:
+        # Extract the location suffix (e.g. "Al Quoz", "Sajaa", "Industrial Area 4")
+        parts = name.replace("Talas Tesla Auto Parts - ", "").replace("Talas Tesla Auto Parts", "")
+        short_names[name] = parts.strip() or name[:15]
+
+    for metric in metric_list:
+        click.secho(f"\n  {metric}", fg="white", bold=True)
+        rows = []
+        for d in sorted(all_dates):
+            row = {"date": d}
+            total = 0
+            for loc_title in loc_names:
+                vals = {v["date"]: v["value"] for v in all_results[loc_title].get(metric, [])}
+                v = vals.get(d, 0)
+                row[short_names[loc_title]] = v
+                total += v
+            row["TOTAL"] = total
+            rows.append(row)
+        cols = ["date"] + [short_names[t] for t in loc_names] + ["TOTAL"]
+        print_table(rows, cols)
+
+
+@gbp.command("search-keywords")
+@click.option("-l", "--location", required=True, help="Location ID or full name.")
+@click.option("--months", default=3, help="Months to look back.")
+@click.option("--limit", default=50, help="Max keywords.")
+@click.option("--json", "as_json", is_flag=True)
+def gbp_search_keywords(location, months, limit, as_json):
+    """Monthly search keyword impressions for a GBP location."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    loc = _normalize_location(location)
+    now = _today_date()
+    end_month = (now.year, now.month)
+    start_y, start_m = now.year, now.month - months + 1
+    while start_m < 1:
+        start_m += 12
+        start_y -= 1
+    keywords = gbp_search_keywords_monthly(creds, loc, (start_y, start_m), end_month, page_size=limit)
+    if as_json:
+        return print_json(keywords)
+    print_table(keywords[:limit], ["keyword", "impressions"])
+
+
+@gbp.command("metrics-list")
+def gbp_metrics_list():
+    """List all available GBP daily metrics."""
+    for m in DAILY_METRICS:
+        click.echo(f"  {m}")
+
+
+# ── Search Console commands ──────────────────────────────────
+
+@cli.group()
+def gsc():
+    """Google Search Console commands."""
+    pass
+
+
+@gsc.command("sites")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_sites_cmd(as_json):
+    """List verified Search Console sites."""
+    enforce_allowed_caller()
+    data = gsc_list_sites(get_credentials())
+    sites = data.get("siteEntry", [])
+    if as_json:
+        return print_json(sites)
+    rows = [{"url": s.get("siteUrl", ""), "level": s.get("permissionLevel", "")} for s in sites]
+    print_table(rows, ["url", "level"])
+
+
+@gsc.command("queries")
+@click.option("-s", "--site", required=True, help="Site URL (e.g. https://shop.talas.ae/).")
+@click.option("-d", "--days", default=28, help="Days to look back.")
+@click.option("--limit", default=25, help="Max rows.")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_queries_cmd(site, days, limit, as_json):
+    """Top search queries from Search Console."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
+    start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["query"], row_limit=limit)
+    rows_raw = data.get("rows", [])
+    if as_json:
+        return print_json(rows_raw)
+    rows = [{"query": r["keys"][0], "clicks": int(r.get("clicks", 0)),
+             "impressions": int(r.get("impressions", 0)),
+             "ctr": f"{r.get('ctr', 0) * 100:.1f}%",
+             "position": f"{r.get('position', 0):.1f}"} for r in rows_raw]
+    print_table(rows, ["query", "clicks", "impressions", "ctr", "position"])
+
+
+@gsc.command("pages")
+@click.option("-s", "--site", required=True, help="Site URL.")
+@click.option("-d", "--days", default=28, help="Days to look back.")
+@click.option("--limit", default=25, help="Max rows.")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_pages_cmd(site, days, limit, as_json):
+    """Top pages from Search Console."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
+    start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["page"], row_limit=limit)
+    rows_raw = data.get("rows", [])
+    if as_json:
+        return print_json(rows_raw)
+    rows = [{"page": r["keys"][0], "clicks": int(r.get("clicks", 0)),
+             "impressions": int(r.get("impressions", 0)),
+             "ctr": f"{r.get('ctr', 0) * 100:.1f}%",
+             "position": f"{r.get('position', 0):.1f}"} for r in rows_raw]
+    print_table(rows, ["page", "clicks", "impressions", "ctr", "position"])
+
+
+@gsc.command("performance")
+@click.option("-s", "--site", required=True, help="Site URL.")
+@click.option("-d", "--days", default=28, help="Days to look back.")
+@click.option("--json", "as_json", is_flag=True)
+def gsc_perf_cmd(site, days, as_json):
+    """Daily performance from Search Console."""
+    enforce_allowed_caller()
+    creds = get_credentials()
+    end = (_today_date() - timedelta(days=3)).strftime("%Y-%m-%d")
+    start = (_today_date() - timedelta(days=days)).strftime("%Y-%m-%d")
+    data = gsc_search_analytics(creds, site, start, end, dimensions=["date"], row_limit=1000)
+    rows_raw = data.get("rows", [])
+    if as_json:
+        return print_json(rows_raw)
+    rows = [{"date": r["keys"][0], "clicks": int(r.get("clicks", 0)),
+             "impressions": int(r.get("impressions", 0)),
+             "ctr": f"{r.get('ctr', 0) * 100:.1f}%",
+             "position": f"{r.get('position', 0):.1f}"}
+            for r in sorted(rows_raw, key=lambda x: x["keys"][0])]
+    print_table(rows, ["date", "clicks", "impressions", "ctr", "position"])
+
 
 # ── Merchant commands ────────────────────────────────────────
 

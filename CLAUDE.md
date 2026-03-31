@@ -29,7 +29,8 @@ python generate_token.py
 | `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking and offline upload | Yes |
 | `audience` | `list`, `create`, `upload`, `job-status` | Customer Match lists and CSV upload | Yes |
 | `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
-| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply` | Google Business Profile management | No |
+| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list` | Google Business Profile management + performance analytics | No |
+| `gsc` | `sites`, `queries`, `pages`, `performance` | Google Search Console — queries, pages, daily performance | No |
 | `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
 | `ga4` | `report`, `realtime`, `metadata` | Google Analytics 4 reporting | No |
 | Top-level | `query`, `perf`, `config`, `refresh`, `snapshot`, `log`, `accounts`, `doctor`, `mutate`, `batch-mutate` | GAQL queries, syncing, snapshots, generic mutations | Yes (except `doctor`) |
@@ -118,7 +119,7 @@ gads-cli/
 │   ├── config.py           # Environment-driven configuration
 │   ├── auth.py             # OAuth credential management + refresh
 │   ├── ads.py              # Google Ads REST client + GAQL runner
-│   ├── gbp.py              # GBP client (3 base URLs: account mgmt, business info, legacy v4)
+│   ├── gbp.py              # GBP client (4 base URLs: account mgmt, business info, legacy v4, performance)
 │   ├── merchant.py         # Merchant Center REST client
 │   ├── ga4.py              # GA4 Data API client
 │   ├── http.py             # HTTP helpers with auth headers
@@ -155,12 +156,24 @@ gads-cli/
 
 ### GBP
 
-**Three different base URLs:**
+**Four different base URLs:**
 - `mybusinessaccountmanagement.googleapis.com` (v1) — accounts, locations
 - `mybusinessbusinessinformation.googleapis.com` (v1) — location details, hours, attributes
 - `mybusiness.googleapis.com` (v4, legacy) — reviews, media, posts, Q&A
+- `businessprofileperformance.googleapis.com` (v1) — directions, calls, impressions, search keywords
 
 Each endpoint must use its correct base URL or requests fail.
+
+**GBP Performance daily metrics:** BUSINESS_DIRECTION_REQUESTS, CALL_CLICKS, WEBSITE_CLICKS, BUSINESS_IMPRESSIONS_DESKTOP_MAPS, BUSINESS_IMPRESSIONS_DESKTOP_SEARCH, BUSINESS_IMPRESSIONS_MOBILE_MAPS, BUSINESS_IMPRESSIONS_MOBILE_SEARCH, BUSINESS_CONVERSATIONS, BUSINESS_BOOKINGS, BUSINESS_FOOD_ORDERS, BUSINESS_FOOD_MENU_CLICKS.
+
+**GBP Performance reporting lag:** Data takes 2-3 days to populate. Recent days may show zero.
+
+### GSC (Search Console)
+
+- Base URL: `www.googleapis.com/webmasters/v3`
+- Requires `webmasters.readonly` OAuth scope (added in v3.3.0)
+- Data lags ~3 days (GSC default processing delay)
+- Site URL must match verified property exactly (URL-prefix or domain property)
 
 ### Database
 
@@ -212,6 +225,16 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads gbp locations --account accounts/123456789
 ./gads gbp reviews locations/987654321
 ./gads gbp reply-review accounts/123/locations/456/reviews/789 "Thank you for your review!"
+./gads gbp perf -l 17303088970776446827 -d 14
+./gads gbp perf-all -d 7 -m "BUSINESS_DIRECTION_REQUESTS,CALL_CLICKS,WEBSITE_CLICKS"
+./gads gbp search-keywords -l 17303088970776446827 --months 3
+./gads gbp metrics-list
+
+# Google Search Console
+./gads gsc sites
+./gads gsc queries -s "https://shop.talas.ae/" -d 28
+./gads gsc pages -s "https://shop.talas.ae/" -d 28
+./gads gsc performance -s "https://shop.talas.ae/" -d 28
 
 # Merchant Center
 ./gads merchant account

@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-03-31
+
+### Added
+- **GBP Performance API** (4 new commands):
+  - `gbp perf` — daily performance metrics for a single location
+  - `gbp perf-all` — daily metrics for ALL locations with auto-discovery
+  - `gbp search-keywords` — monthly search keyword impressions
+  - `gbp metrics-list` — list all available daily metrics
+- **Google Search Console** (4 new commands, new `gsc` command group):
+  - `gsc sites` — list verified Search Console sites
+  - `gsc queries` — top search queries with clicks, impressions, CTR, position
+  - `gsc pages` — top pages performance
+  - `gsc performance` — daily performance time series
+- New OAuth scope: `webmasters.readonly` (Search Console access)
+- New GCP API: Business Profile Performance API added to `auth setup`
+- New GCP API: Search Console API added to `auth setup`
+- `auth test` now tests Search Console access
+- Scope display in `auth login` now shows Search Console grant status
+
+### Changed
+- Total commands: 65 → 73 across 15 groups (was 14)
+- OAuth SCOPES list: 4 → 5 scopes
+
 ## [3.2.0] - 2026-03-28
 
 ### Changed
