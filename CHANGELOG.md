@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
   - `gbp perf-all` — daily metrics for ALL locations with auto-discovery
   - `gbp search-keywords` — monthly search keyword impressions
   - `gbp metrics-list` — list all available daily metrics
+- **GBP Location Asset Performance** (2 new commands, via Google Ads GAQL):
+  - `gbp ads-perf` — per-branch aggregate (clicks, impr, CTR, CPC, cost, conv)
+  - `gbp ads-daily` — per-branch daily breakdown with totals
+  - Uses `asset_set_asset` resource with `LOCATION_SYNC` asset set
+  - Matches Ads UI Asset Report > Associations > Location view exactly
 - **Google Search Console** (4 new commands, new `gsc` command group):
   - `gsc sites` — list verified Search Console sites
   - `gsc queries` — top search queries with clicks, impressions, CTR, position
@@ -22,7 +27,8 @@ All notable changes to this project will be documented in this file.
 - Scope display in `auth login` now shows Search Console grant status
 
 ### Changed
-- Total commands: 65 → 73 across 15 groups (was 14)
+- Total commands: 65 → 75 across 15 groups (was 14)
+- GBP commands: 6 → 12
 - OAuth SCOPES list: 4 → 5 scopes
 
 ## [3.2.0] - 2026-03-28

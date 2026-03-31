@@ -29,7 +29,7 @@ python generate_token.py
 | `conversion` | `list`, `create`, `tag`, `perf`, `upload` | Conversion tracking and offline upload | Yes |
 | `audience` | `list`, `create`, `upload`, `job-status` | Customer Match lists and CSV upload | Yes |
 | `report` | `geo`, `hourly`, `devices`, `search-terms` | Specialized performance breakdowns | Yes |
-| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list` | Google Business Profile management + performance analytics | No |
+| `gbp` | `accounts`, `locations`, `location`, `reviews`, `reply-review`, `delete-reply`, `perf`, `perf-all`, `search-keywords`, `metrics-list`, `ads-perf`, `ads-daily` | Google Business Profile management + performance analytics | No |
 | `gsc` | `sites`, `queries`, `pages`, `performance` | Google Search Console — queries, pages, daily performance | No |
 | `merchant` | `account`, `status`, `products`, `product-status`, `feeds`, `shipping`, `returns` | Merchant Center product management | No |
 | `ga4` | `report`, `realtime`, `metadata` | Google Analytics 4 reporting | No |
@@ -229,6 +229,10 @@ Each endpoint must use its correct base URL or requests fail.
 ./gads gbp perf-all -d 7 -m "BUSINESS_DIRECTION_REQUESTS,CALL_CLICKS,WEBSITE_CLICKS"
 ./gads gbp search-keywords -l 17303088970776446827 --months 3
 ./gads gbp metrics-list
+
+# GBP location asset performance in Google Ads
+./gads gbp ads-perf -d 30
+./gads gbp ads-daily -d 14
 
 # Google Search Console
 ./gads gsc sites
